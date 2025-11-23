@@ -20,6 +20,8 @@ The pipeline supports both **bacterial** (16S rRNA) and **fungal** (ITS) amplico
 - ✅ Support for both bacterial and fungal taxonomy annotation
 - ✅ Integrated phyloseq object creation
 - ✅ Basic diversity and composition analysis
+- ✅ **Advanced richness modeling** accounting for sequencing depth
+- ✅ **DESeq2 differential abundance analysis** for quantitative comparisons
 - ✅ Reproducible environment management with renv
 - ✅ Configurable parameters via YAML
 - ✅ Comprehensive tracking of reads through pipeline steps
@@ -123,16 +125,39 @@ This will:
 4. Generate visualizations and summary statistics
 5. Save all outputs to the `output/` directory
 
+### 6. Extended Analysis (Optional)
+
+For advanced downstream analyses, run the extended analysis workflow:
+
+```bash
+Rscript -e "rmarkdown::render('extended_analysis.Rmd')"
+```
+
+The extended analysis includes:
+- **Richness regression modeling**: Accounts for sequencing depth effects on richness by modeling residuals from richness vs. depth regression
+- **DESeq2 differential abundance analysis**: Identifies taxa with significantly different abundances between groups using quantitative methods
+- PERMANOVA and beta dispersion tests
+- Relative abundance calculations
+- Heatmaps and co-occurrence networks
+- Comprehensive data exports
+
 ## Output Files
 
 The pipeline generates:
 
+**Main Analysis:**
 - `output/phyloseq_object.rds` - Complete phyloseq object
 - `output/phyloseq_filtered.rds` - Quality-filtered phyloseq object
 - `output/taxonomy.rds` - Taxonomy assignment table
 - `output/figures/` - All visualization plots
 - `output/tables/` - Summary tables and statistics
 - `analysis.html` - Complete analysis report
+
+**Extended Analysis (if run):**
+- `output/tables/richness_regression.csv` - Richness regression results with depth-corrected values
+- `output/tables/deseq2_results.csv` - Complete DESeq2 differential abundance results
+- `output/tables/deseq2_significant.csv` - Significantly differentially abundant taxa only
+- `extended_analysis.html` - Extended analysis report with advanced visualizations
 
 ## Project Structure
 

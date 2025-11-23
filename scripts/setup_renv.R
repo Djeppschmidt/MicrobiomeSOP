@@ -25,15 +25,17 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
 packages <- c(
   "dada2",
   "phyloseq",
+  "DESeq2",
   "ggplot2",
   "yaml",
   "dplyr",
   "tidyr",
   "knitr",
-  "rmarkdown"
+  "rmarkdown",
+  "vegan"
 )
 
-bioc_packages <- c("dada2", "phyloseq")
+bioc_packages <- c("dada2", "phyloseq", "DESeq2")
 cran_packages <- setdiff(packages, bioc_packages)
 
 # Install CRAN packages

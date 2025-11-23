@@ -218,6 +218,294 @@ if (ntaxa(ps) < 100) {
 }
 ```
 
+# Richness Regression Analysis
+
+This analysis models richness while accounting for sequencing depth using regression residuals.
+
+```{r richness-regression, fig.width=10, fig.height=8}
+# Calculate observed richness and sequencing depth
+richness_data <- data.frame(
+  SampleID = sample_names(ps),
+  ObservedRichness = estimate_richness(ps, measures = "Observed")$Observed,
+  SequencingDepth = sample_sums(ps)
+)
+
+# Merge with sample metadata if available
+sample_data_df <- as.data.frame(sample_data(ps))
+sample_data_df$SampleID <- rownames(sample_data_df)
+richness_data <- merge(richness_data, sample_data_df, by = "SampleID", all.x = TRUE)
+
+# Fit linear regression: Richness ~ Sequencing Depth
+richness_model <- lm(ObservedRichness ~ SequencingDepth, data = richness_data)
+
+cat("Regression Model Summary:\n")
+cat("=========================\n")
+print(summary(richness_model))
+
+# Calculate residuals (depth-corrected richness)
+richness_data$Residuals <- residuals(richness_model)
+richness_data$FittedValues <- fitted(richness_model)
+
+# Visualize the regression
+p1 <- ggplot(richness_data, aes(x = SequencingDepth, y = ObservedRichness)) +
+  geom_point(size = 3, alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  theme_bw() +
+  labs(title = "Richness vs Sequencing Depth",
+       x = "Sequencing Depth (Total Reads)",
+       y = "Observed Richness")
+
+print(p1)
+
+# Plot residuals
+p2 <- ggplot(richness_data, aes(x = FittedValues, y = Residuals)) +
+  geom_point(size = 3, alpha = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(se = TRUE, color = "blue") +
+  theme_bw() +
+  labs(title = "Residuals vs Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals (Depth-Corrected Richness)")
+
+print(p2)
+
+# Test residuals by group if Group variable exists
+if ("Group" %in% colnames(richness_data)) {
+  cat("\n\nTesting Depth-Corrected Richness by Group:\n")
+  cat("==========================================\n")
+  
+  # ANOVA on residuals
+  residual_anova <- aov(Residuals ~ Group, data = richness_data)
+  print(summary(residual_anova))
+  
+  # Visualize residuals by group
+  p3 <- ggplot(richness_data, aes(x = Group, y = Residuals, fill = Group)) +
+    geom_boxplot(alpha = 0.7) +
+    geom_jitter(width = 0.2, alpha = 0.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Depth-Corrected Richness by Group",
+         x = "Group",
+         y = "Residuals (Depth-Corrected Richness)",
+         caption = "Positive residuals = higher than expected richness for sequencing depth")
+  
+  print(p3)
+  
+  # Pairwise comparisons if more than 2 groups
+  if (length(unique(richness_data$Group)) > 2) {
+    cat("\n\nPairwise Comparisons (Tukey HSD):\n")
+    tukey_result <- TukeyHSD(residual_anova)
+    print(tukey_result)
+  }
+}
+
+# Save richness regression data
+write.csv(richness_data, "output/tables/richness_regression.csv", row.names = FALSE)
+cat("\nRichness regression data saved to output/tables/richness_regression.csv\n")
+```
+
+# Differential Abundance Analysis (DESeq2)
+
+This analysis uses DESeq2 to identify taxa with significantly different abundances between groups, accounting for sequencing depth and variability.
+
+```{r deseq2-analysis, fig.width=12, fig.height=10}
+# Check if DESeq2 is available
+if (!requireNamespace("DESeq2", quietly = TRUE)) {
+  cat("DESeq2 package not installed. Install with:\n")
+  cat("BiocManager::install('DESeq2')\n")
+  cat("Skipping differential abundance analysis.\n")
+} else {
+  library(DESeq2)
+  
+  # Check if Group variable exists
+  if ("Group" %in% colnames(sample_data_df)) {
+    cat("Performing DESeq2 differential abundance analysis...\n")
+    cat("===================================================\n\n")
+    
+    # Convert phyloseq to DESeq2 format
+    # DESeq2 requires integer counts
+    diagdds <- phyloseq_to_deseq2(ps, ~ Group)
+    
+    # Calculate geometric means for normalization
+    # (required for samples with zeros)
+    gm_mean <- function(x, na.rm = TRUE) {
+      exp(sum(log(x[x > 0]), na.rm = na.rm) / length(x))
+    }
+    
+    geoMeans <- apply(counts(diagdds), 1, gm_mean)
+    diagdds <- estimateSizeFactors(diagdds, geoMeans = geoMeans)
+    
+    # Run DESeq2 analysis
+    diagdds <- DESeq(diagdds, fitType = "local", quiet = TRUE)
+    
+    cat("DESeq2 analysis complete.\n\n")
+    
+    # Extract results
+    # Get contrasts (comparing first two groups)
+    groups <- unique(sample_data_df$Group)
+    if (length(groups) >= 2) {
+      contrast_name <- paste(groups[1], "vs", groups[2])
+      cat("Contrast:", contrast_name, "\n\n")
+      
+      res <- results(diagdds, contrast = c("Group", groups[1], groups[2]))
+      
+      # Order by adjusted p-value
+      res_ordered <- res[order(res$padj, na.last = NA), ]
+      
+      # Summary
+      cat("DESeq2 Results Summary:\n")
+      print(summary(res))
+      
+      # Filter significant results (adjusted p-value < 0.05)
+      alpha <- 0.05
+      sig_res <- res_ordered[which(res_ordered$padj < alpha), ]
+      
+      cat("\n\nNumber of significant taxa (padj <", alpha, "):", nrow(sig_res), "\n")
+      
+      if (nrow(sig_res) > 0) {
+        cat("\nTop 10 most significant taxa:\n")
+        cat("==============================\n")
+        
+        # Get taxonomy for significant results
+        sig_taxa <- rownames(sig_res)[1:min(10, nrow(sig_res))]
+        tax_sig <- as.data.frame(tax_table(ps)[sig_taxa, ])
+        
+        # Combine with DESeq2 results
+        sig_results_table <- cbind(
+          tax_sig,
+          baseMean = sig_res[sig_taxa, "baseMean"],
+          log2FoldChange = sig_res[sig_taxa, "log2FoldChange"],
+          padj = sig_res[sig_taxa, "padj"]
+        )
+        
+        print(sig_results_table)
+        
+        # Volcano plot
+        res_df <- as.data.frame(res)
+        res_df$significant <- ifelse(res_df$padj < alpha & !is.na(res_df$padj), 
+                                     "Significant", "Not Significant")
+        
+        p_volcano <- ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj))) +
+          geom_point(aes(color = significant), alpha = 0.6, size = 2) +
+          scale_color_manual(values = c("Not Significant" = "gray", 
+                                       "Significant" = "red")) +
+          geom_vline(xintercept = c(-1, 1), linetype = "dashed", alpha = 0.5) +
+          geom_hline(yintercept = -log10(alpha), linetype = "dashed", alpha = 0.5) +
+          theme_bw() +
+          labs(title = paste("Volcano Plot:", contrast_name),
+               x = "Log2 Fold Change",
+               y = "-Log10 Adjusted P-value",
+               color = "Status") +
+          theme(legend.position = "bottom")
+        
+        print(p_volcano)
+        
+        # MA plot
+        p_ma <- ggplot(res_df, aes(x = log10(baseMean), y = log2FoldChange)) +
+          geom_point(aes(color = significant), alpha = 0.6, size = 2) +
+          scale_color_manual(values = c("Not Significant" = "gray", 
+                                       "Significant" = "red")) +
+          geom_hline(yintercept = 0, linetype = "dashed", color = "blue") +
+          theme_bw() +
+          labs(title = paste("MA Plot:", contrast_name),
+               x = "Log10 Mean Abundance",
+               y = "Log2 Fold Change",
+               color = "Status") +
+          theme(legend.position = "bottom")
+        
+        print(p_ma)
+        
+        # Bar plot of top significant taxa
+        if (nrow(sig_res) > 0) {
+          top_n <- min(20, nrow(sig_res))
+          top_taxa <- rownames(sig_res)[1:top_n]
+          
+          # Get normalized counts
+          normalized_counts <- counts(diagdds, normalized = TRUE)
+          top_counts <- normalized_counts[top_taxa, , drop = FALSE]
+          
+          # Create data frame for plotting
+          top_counts_df <- as.data.frame(top_counts)
+          top_counts_df$ASV <- rownames(top_counts_df)
+          
+          # Add taxonomy
+          tax_top <- as.data.frame(tax_table(ps)[top_taxa, ])
+          
+          # Create label (use lowest available taxonomic level)
+          tax_labels <- apply(tax_top, 1, function(x) {
+            for (i in length(x):1) {
+              if (!is.na(x[i]) && x[i] != "") {
+                return(paste(names(x)[i], x[i], sep = ":"))
+              }
+            }
+            return("Unknown")
+          })
+          
+          top_counts_df$Taxonomy <- tax_labels[top_counts_df$ASV]
+          
+          # Melt for plotting
+          top_counts_long <- tidyr::pivot_longer(
+            top_counts_df,
+            cols = -c(ASV, Taxonomy),
+            names_to = "Sample",
+            values_to = "Abundance"
+          )
+          
+          # Add group information
+          sample_groups <- sample_data_df[, c("Group")]
+          names(sample_groups) <- rownames(sample_data_df)
+          top_counts_long$Group <- sample_groups[top_counts_long$Sample]
+          
+          p_bar <- ggplot(top_counts_long, 
+                         aes(x = Taxonomy, y = Abundance, fill = Group)) +
+            geom_bar(stat = "summary", fun = "mean", position = "dodge") +
+            geom_errorbar(stat = "summary", fun.data = "mean_se", 
+                         position = position_dodge(width = 0.9), width = 0.2) +
+            theme_bw() +
+            theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8)) +
+            labs(title = paste("Top", top_n, "Differentially Abundant Taxa"),
+                 x = "Taxon",
+                 y = "Mean Normalized Abundance",
+                 caption = paste("Error bars represent standard error;", 
+                               contrast_name))
+          
+          print(p_bar)
+        }
+        
+        # Export results
+        res_export <- as.data.frame(res)
+        res_export$ASV <- rownames(res_export)
+        
+        # Add taxonomy
+        tax_all <- as.data.frame(tax_table(ps))
+        res_export <- merge(res_export, tax_all, by.x = "ASV", by.y = "row.names", all.x = TRUE)
+        
+        # Reorder columns
+        res_export <- res_export[order(res_export$padj, na.last = NA), ]
+        
+        write.csv(res_export, "output/tables/deseq2_results.csv", row.names = FALSE)
+        cat("\n\nDESeq2 results saved to output/tables/deseq2_results.csv\n")
+        
+        # Export significant results only
+        if (nrow(sig_res) > 0) {
+          sig_export <- res_export[res_export$padj < alpha & !is.na(res_export$padj), ]
+          write.csv(sig_export, "output/tables/deseq2_significant.csv", row.names = FALSE)
+          cat("Significant results saved to output/tables/deseq2_significant.csv\n")
+        }
+      } else {
+        cat("\nNo significant differentially abundant taxa found at alpha =", alpha, "\n")
+      }
+    } else {
+      cat("Need at least 2 groups for differential abundance analysis.\n")
+    }
+  } else {
+    cat("No 'Group' variable found in sample metadata.\n")
+    cat("Differential abundance analysis requires group information.\n")
+  }
+}
+```
+
 # Export Results
 
 ```{r export-results}
@@ -255,6 +543,14 @@ This extended analysis included:
 4. ✓ Relative abundance visualizations
 5. ✓ Heatmap of top taxa
 6. ✓ Network analysis (for small datasets)
-7. ✓ Export of results to CSV files
+7. ✓ **Richness regression analysis** - modeling richness while accounting for sequencing depth
+8. ✓ **DESeq2 differential abundance analysis** - quantitative identification of differentially abundant taxa
+9. ✓ Export of results to CSV files
+
+**New Analyses:**
+
+- **Richness Regression**: Models observed richness as a function of sequencing depth, extracting residuals that represent depth-corrected richness. This allows comparison of richness between samples independent of sequencing effort.
+
+- **DESeq2 Analysis**: Performs robust differential abundance testing that accounts for library size differences and biological variability. Outputs include volcano plots, MA plots, and tables of significant taxa with taxonomy annotations.
 
 You can further customize these analyses based on your specific research questions.
