@@ -1,0 +1,260 @@
+---
+title: "Extended Microbiome Analysis"
+author: "MicrobiomeSOP"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+This is an example extended analysis script showing additional analyses you can perform after running the main `analysis.Rmd` pipeline. It loads the phyloseq object created by the main pipeline and demonstrates various downstream analyses.
+
+**Prerequisites**: Run `analysis.Rmd` first to generate the phyloseq object.
+
+# Load Libraries and Data
+
+```{r load-data}
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(vegan)
+
+# Load the filtered phyloseq object from main analysis
+ps <- readRDS("output/phyloseq_filtered.rds")
+
+cat("Loaded phyloseq object:\n")
+print(ps)
+```
+
+# Data Exploration
+
+## Sample Summary
+
+```{r sample-summary}
+# Get sample sums
+sample_sums_df <- data.frame(
+  SampleID = sample_names(ps),
+  ReadCount = sample_sums(ps)
+)
+
+# Summary statistics
+cat("Read count summary:\n")
+summary(sample_sums_df$ReadCount)
+
+# Visualize
+ggplot(sample_sums_df, aes(x = reorder(SampleID, ReadCount), y = ReadCount)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Total Reads per Sample",
+       x = "Sample",
+       y = "Read Count") +
+  geom_hline(yintercept = median(sample_sums_df$ReadCount), 
+             linetype = "dashed", color = "red")
+```
+
+## Taxonomy Summary
+
+```{r taxonomy-summary}
+# Count taxa at each level
+tax_table_df <- as.data.frame(tax_table(ps))
+
+for (rank in c("Phylum", "Class", "Order", "Family", "Genus")) {
+  if (rank %in% colnames(tax_table_df)) {
+    n_unique <- length(unique(tax_table_df[[rank]]))
+    cat(sprintf("Number of unique %s: %d\n", rank, n_unique))
+  }
+}
+
+# Most abundant phyla
+if ("Phylum" %in% colnames(tax_table_df)) {
+  phylum_counts <- table(tax_table_df$Phylum)
+  cat("\nTop 10 most abundant phyla (by number of ASVs):\n")
+  print(head(sort(phylum_counts, decreasing = TRUE), 10))
+}
+```
+
+# Advanced Diversity Analysis
+
+## Alpha Diversity by Group
+
+```{r alpha-by-group, fig.width=10, fig.height=6}
+# Calculate diversity indices
+alpha_div <- estimate_richness(ps, measures = c("Shannon", "Simpson", "Chao1"))
+alpha_div$SampleID <- rownames(alpha_div)
+
+# Merge with sample data
+sample_data_df <- as.data.frame(sample_data(ps))
+sample_data_df$SampleID <- rownames(sample_data_df)
+alpha_div_merged <- merge(alpha_div, sample_data_df, by = "SampleID")
+
+# Plot by group if available
+if ("Group" %in% colnames(alpha_div_merged)) {
+  library(tidyr)
+  alpha_long <- pivot_longer(
+    alpha_div_merged,
+    cols = c("Shannon", "Simpson", "Chao1"),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+  
+  ggplot(alpha_long, aes(x = Group, y = Value, fill = Group)) +
+    geom_boxplot() +
+    facet_wrap(~Metric, scales = "free_y") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Alpha Diversity by Group",
+         x = "Group",
+         y = "Diversity Value")
+}
+```
+
+## Beta Diversity Analysis
+
+```{r beta-diversity, fig.width=10, fig.height=8}
+# Calculate distance matrix
+dist_matrix <- phyloseq::distance(ps, method = "bray")
+
+# Perform PERMANOVA if groups exist
+if ("Group" %in% colnames(sample_data_df)) {
+  # PERMANOVA test
+  permanova_result <- adonis2(dist_matrix ~ Group, 
+                              data = sample_data_df, 
+                              permutations = 999)
+  
+  cat("PERMANOVA Results:\n")
+  print(permanova_result)
+  
+  # Test for homogeneity of dispersion
+  beta_disp <- betadisper(dist_matrix, sample_data_df$Group)
+  cat("\nBeta Dispersion Test:\n")
+  print(permutest(beta_disp, permutations = 999))
+}
+
+# PCoA with improved visualization
+pcoa <- ordinate(ps, method = "PCoA", distance = "bray")
+
+# Plot with variance explained
+p <- plot_ordination(ps, pcoa, type = "samples", color = "Group") +
+  theme_bw() +
+  labs(title = "PCoA Ordination - Bray-Curtis Distance")
+
+if ("Group" %in% colnames(sample_data_df)) {
+  p <- p + stat_ellipse(aes(color = Group), type = "t", level = 0.95)
+}
+
+print(p)
+```
+
+# Taxonomic Analysis
+
+## Relative Abundance
+
+```{r relative-abundance, fig.width=12, fig.height=8}
+# Transform to relative abundance
+ps_rel <- transform_sample_counts(ps, function(x) x / sum(x) * 100)
+
+# Get top taxa at Genus level
+top_genera <- names(sort(taxa_sums(ps_rel), decreasing = TRUE)[1:20])
+ps_top <- prune_taxa(top_genera, ps_rel)
+
+# Melt for plotting
+ps_melt <- psmelt(ps_top)
+
+if ("Genus" %in% colnames(ps_melt)) {
+  ggplot(ps_melt, aes(x = Sample, y = Abundance, fill = Genus)) +
+    geom_bar(stat = "identity") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Top 20 Genera - Relative Abundance",
+         x = "Sample",
+         y = "Relative Abundance (%)") +
+    scale_fill_manual(values = rainbow(20))
+}
+```
+
+## Heatmap of Top Taxa
+
+```{r heatmap, fig.width=10, fig.height=8}
+# Create heatmap of top 30 taxa
+top_30 <- names(sort(taxa_sums(ps), decreasing = TRUE)[1:30])
+ps_top30 <- prune_taxa(top_30, ps)
+ps_top30_rel <- transform_sample_counts(ps_top30, function(x) x / sum(x) * 100)
+
+plot_heatmap(ps_top30_rel, 
+             method = "PCoA", 
+             distance = "bray",
+             taxa.label = "Genus",
+             taxa.order = "Genus",
+             low = "white", 
+             high = "darkblue") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Heatmap of Top 30 Taxa")
+```
+
+# Network Analysis
+
+```{r network, fig.width=10, fig.height=10}
+# Create network plot
+# Note: This is computationally intensive for large datasets
+if (ntaxa(ps) < 100) {
+  net <- make_network(ps, type = "taxa", distance = "bray", max.dist = 0.3)
+  plot_network(net, ps, 
+               type = "taxa", 
+               color = "Phylum",
+               point_size = 3) +
+    theme_void() +
+    labs(title = "Taxa Co-occurrence Network")
+} else {
+  cat("Dataset too large for network analysis. Consider subsetting.\n")
+}
+```
+
+# Export Results
+
+```{r export-results}
+# Export OTU table
+otu_table_export <- as.data.frame(otu_table(ps))
+write.csv(otu_table_export, "output/tables/otu_table.csv")
+
+# Export taxonomy table
+tax_table_export <- as.data.frame(tax_table(ps))
+write.csv(tax_table_export, "output/tables/taxonomy_table.csv")
+
+# Export sample data
+sample_data_export <- as.data.frame(sample_data(ps))
+write.csv(sample_data_export, "output/tables/sample_metadata.csv")
+
+# Export alpha diversity
+write.csv(alpha_div_merged, "output/tables/alpha_diversity.csv", row.names = FALSE)
+
+cat("Results exported to output/tables/\n")
+```
+
+# Session Information
+
+```{r session-info}
+sessionInfo()
+```
+
+# Summary
+
+This extended analysis included:
+
+1. ✓ Sample and taxonomy summaries
+2. ✓ Advanced alpha diversity analysis
+3. ✓ Beta diversity with statistical tests (PERMANOVA)
+4. ✓ Relative abundance visualizations
+5. ✓ Heatmap of top taxa
+6. ✓ Network analysis (for small datasets)
+7. ✓ Export of results to CSV files
+
+You can further customize these analyses based on your specific research questions.
