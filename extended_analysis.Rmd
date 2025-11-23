@@ -295,7 +295,7 @@ if ("Group" %in% colnames(richness_data)) {
   # Pairwise comparisons if more than 2 groups
   if (length(unique(richness_data$Group)) > 2) {
     cat("\n\nPairwise Comparisons (Tukey HSD):\n")
-    tukey_result <- TukeyHSD(residual_anova)
+    tukey_result <- stats::TukeyHSD(residual_anova)
     print(tukey_result)
   }
 }

@@ -23,18 +23,19 @@ if (!requireNamespace("BiocManager", quietly = TRUE)) {
 
 # Install required packages
 packages <- c(
-  "dada2",
-  "phyloseq",
-  "DESeq2",
-  "ggplot2",
-  "yaml",
-  "dplyr",
-  "tidyr",
-  "knitr",
-  "rmarkdown",
-  "vegan"
+  "dada2",      # Bioconductor
+  "phyloseq",   # Bioconductor
+  "DESeq2",     # Bioconductor
+  "ggplot2",    # CRAN
+  "yaml",       # CRAN
+  "dplyr",      # CRAN
+  "tidyr",      # CRAN
+  "knitr",      # CRAN
+  "rmarkdown",  # CRAN
+  "vegan"       # CRAN - for diversity analyses
 )
 
+# Separate Bioconductor packages from CRAN packages
 bioc_packages <- c("dada2", "phyloseq", "DESeq2")
 cran_packages <- setdiff(packages, bioc_packages)
 
