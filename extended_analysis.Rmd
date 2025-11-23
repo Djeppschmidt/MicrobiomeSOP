@@ -330,6 +330,7 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
     # Calculate geometric means for normalization
     # (required for samples with zeros)
     gm_mean <- function(x, na.rm = TRUE) {
+      if (length(x[x > 0]) == 0) return(0)
       exp(sum(log(x[x > 0]), na.rm = na.rm) / length(x[x > 0]))
     }
     
@@ -441,6 +442,7 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
             }
             return("Unknown")
           })
+          names(tax_labels) <- top_taxa
           
           top_counts_df$Taxonomy <- tax_labels[top_counts_df$ASV]
           
