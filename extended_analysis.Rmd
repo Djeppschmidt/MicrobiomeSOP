@@ -328,7 +328,8 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
     diagdds <- phyloseq_to_deseq2(ps, ~ Group)
     
     # Calculate geometric means for normalization
-    # (required for samples with zeros)
+    # Geometric mean calculation that handles zero values by excluding them,
+    # which is necessary for DESeq2 size factor estimation. Returns 0 if all values are zero.
     gm_mean <- function(x, na.rm = TRUE) {
       if (length(x[x > 0]) == 0) return(0)
       exp(sum(log(x[x > 0]), na.rm = na.rm) / length(x[x > 0]))
@@ -338,6 +339,8 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
     diagdds <- estimateSizeFactors(diagdds, geoMeans = geoMeans)
     
     # Run DESeq2 analysis
+    # Using fitType = "local" for more robust dispersion estimation,
+    # which is better suited for datasets with small sample sizes or outliers
     diagdds <- DESeq(diagdds, fitType = "local", quiet = TRUE)
     
     cat("DESeq2 analysis complete.\n\n")
@@ -434,6 +437,8 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
           tax_top <- as.data.frame(tax_table(ps)[top_taxa, ])
           
           # Create label (use lowest available taxonomic level)
+          # Iterates from most specific (Species) to least specific (Kingdom)
+          # to find the lowest non-empty taxonomic classification for each ASV
           tax_labels <- setNames(
             apply(tax_top, 1, function(x) {
               for (i in length(x):1) {
