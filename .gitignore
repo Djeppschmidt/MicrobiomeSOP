@@ -1,0 +1,34 @@
+# R and RStudio files
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+
+# renv library
+renv/library/
+renv/local/
+renv/staging/
+
+# Data files (keep structure, not large data)
+data/raw/*.fastq
+data/raw/*.fastq.gz
+data/raw/*.fq
+data/raw/*.fq.gz
+
+# Output files
+output/*.rds
+output/*.RData
+output/figures/*.png
+output/figures/*.pdf
+output/tables/*.csv
+output/tables/*.tsv
+
+# Temporary files
+*~
+*.tmp
+*.swp
+
+# OS files
+.DS_Store
+Thumbs.db

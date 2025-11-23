@@ -1,0 +1,479 @@
+---
+title: "Microbiome Sequence Analysis Pipeline"
+author: "MicrobiomeSOP"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    number_sections: true
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 8,
+  dpi = 300
+)
+```
+
+# Introduction
+
+This pipeline performs reproducible microbiome sequence analysis using DADA2 for sequence processing and phyloseq for data management and visualization. The pipeline supports both bacterial and fungal amplicon sequencing data.
+
+# Load Libraries
+
+```{r load-libraries}
+# Load required packages
+library(dada2)
+library(phyloseq)
+library(ggplot2)
+library(yaml)
+library(dplyr)
+library(tidyr)
+
+# Set seed for reproducibility
+set.seed(123)
+
+# Load configuration
+config <- yaml::read_yaml("config.yaml")
+analysis_type <- config$analysis_type
+
+cat("Analysis type:", analysis_type, "\n")
+```
+
+# Setup and Data Paths
+
+```{r setup-paths}
+# Define paths
+path <- "data/raw"  # Path to raw fastq files
+output_path <- "output"
+fig_path <- file.path(output_path, "figures")
+table_path <- file.path(output_path, "tables")
+
+# Create output directories if they don't exist
+dir.create(fig_path, showWarnings = FALSE, recursive = TRUE)
+dir.create(table_path, showWarnings = FALSE, recursive = TRUE)
+
+# List files
+fnFs <- sort(list.files(path, pattern = "_R1_001.fastq", full.names = TRUE))
+fnRs <- sort(list.files(path, pattern = "_R2_001.fastq", full.names = TRUE))
+
+# Extract sample names
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+
+cat("Found", length(fnFs), "forward reads and", length(fnRs), "reverse reads\n")
+cat("Sample names:", paste(sample.names, collapse = ", "), "\n")
+```
+
+# Quality Control
+
+## Visualize Quality Profiles
+
+```{r quality-profiles, fig.width=10, fig.height=6}
+if (length(fnFs) > 0) {
+  # Plot quality profiles for forward reads
+  plotQualityProfile(fnFs[1:min(2, length(fnFs))]) + 
+    ggtitle("Forward Read Quality Profile")
+  
+  # Plot quality profiles for reverse reads
+  plotQualityProfile(fnRs[1:min(2, length(fnRs))]) + 
+    ggtitle("Reverse Read Quality Profile")
+}
+```
+
+## Filter and Trim
+
+```{r filter-and-trim}
+# Place filtered files in filtered/ subdirectory
+filtFs <- file.path(path, "filtered", paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(path, "filtered", paste0(sample.names, "_R_filt.fastq.gz"))
+names(filtFs) <- sample.names
+names(filtRs) <- sample.names
+
+# Filter and trim
+if (length(fnFs) > 0) {
+  out <- filterAndTrim(
+    fnFs, filtFs, fnRs, filtRs,
+    truncLen = config$dada2$filter$truncLen,
+    maxN = config$dada2$filter$maxN,
+    maxEE = config$dada2$filter$maxEE,
+    truncQ = config$dada2$filter$truncQ,
+    rm.phix = config$dada2$filter$rm.phix,
+    compress = config$dada2$filter$compress,
+    multithread = TRUE
+  )
+  
+  print(head(out))
+  
+  # Save filtering statistics
+  if (config$output$save_intermediate) {
+    write.csv(out, file.path(table_path, "filtering_stats.csv"))
+  }
+}
+```
+
+# Learn Error Rates
+
+```{r learn-errors}
+if (length(fnFs) > 0) {
+  # Learn forward read errors
+  errF <- learnErrors(filtFs, 
+                      nbases = config$dada2$learn_errors$nbases,
+                      multithread = TRUE)
+  
+  # Learn reverse read errors
+  errR <- learnErrors(filtRs, 
+                      nbases = config$dada2$learn_errors$nbases,
+                      multithread = TRUE)
+  
+  # Plot error rates
+  plotErrors(errF, nominalQ = TRUE) +
+    ggtitle("Forward Read Error Rates")
+  
+  plotErrors(errR, nominalQ = TRUE) +
+    ggtitle("Reverse Read Error Rates")
+}
+```
+
+# Sample Inference
+
+```{r sample-inference}
+if (length(fnFs) > 0) {
+  # Apply core DADA2 sample inference algorithm
+  dadaFs <- dada(filtFs, err = errF, multithread = TRUE)
+  dadaRs <- dada(filtRs, err = errR, multithread = TRUE)
+  
+  # Inspect the returned dada-class object
+  cat("DADA2 inference on first sample:\n")
+  print(dadaFs[[1]])
+}
+```
+
+# Merge Paired Reads
+
+```{r merge-pairs}
+if (length(fnFs) > 0) {
+  # Merge paired end reads
+  mergers <- mergePairs(
+    dadaFs, filtFs,
+    dadaRs, filtRs,
+    minOverlap = config$dada2$merge$minOverlap,
+    maxMismatch = config$dada2$merge$maxMismatch,
+    verbose = TRUE
+  )
+  
+  # Inspect the merger data.frame from the first sample
+  cat("Merged reads for first sample:\n")
+  print(head(mergers[[1]]))
+}
+```
+
+# Construct Sequence Table
+
+```{r construct-seqtab}
+if (length(fnFs) > 0) {
+  # Construct sequence table
+  seqtab <- makeSequenceTable(mergers)
+  
+  cat("Sequence table dimensions:", dim(seqtab), "\n")
+  cat("Sequence length distribution:\n")
+  print(table(nchar(getSequences(seqtab))))
+}
+```
+
+# Remove Chimeras
+
+```{r remove-chimeras}
+if (length(fnFs) > 0) {
+  # Remove chimeric sequences
+  seqtab.nochim <- removeBimeraDenovo(
+    seqtab,
+    method = config$dada2$chimera$method,
+    multithread = TRUE,
+    verbose = TRUE
+  )
+  
+  cat("Dimensions after chimera removal:", dim(seqtab.nochim), "\n")
+  cat("Proportion of non-chimeric sequences:", 
+      sum(seqtab.nochim) / sum(seqtab), "\n")
+}
+```
+
+# Track Reads Through Pipeline
+
+```{r track-reads}
+if (length(fnFs) > 0) {
+  # Create function to get number of unique sequences
+  getN <- function(x) sum(getUniques(x))
+  
+  # Build tracking table
+  track <- cbind(
+    out,
+    sapply(dadaFs, getN),
+    sapply(dadaRs, getN),
+    sapply(mergers, getN),
+    rowSums(seqtab.nochim)
+  )
+  
+  colnames(track) <- c("input", "filtered", "denoisedF", "denoisedR", 
+                       "merged", "nonchim")
+  rownames(track) <- sample.names
+  
+  print(track)
+  
+  # Save tracking table
+  write.csv(track, file.path(table_path, "read_tracking.csv"))
+  
+  # Visualize read tracking
+  track_df <- as.data.frame(track)
+  track_df$sample <- rownames(track_df)
+  track_long <- tidyr::pivot_longer(
+    track_df,
+    cols = -sample,
+    names_to = "step",
+    values_to = "reads"
+  )
+  track_long$step <- factor(
+    track_long$step,
+    levels = c("input", "filtered", "denoisedF", "denoisedR", "merged", "nonchim")
+  )
+  
+  ggplot(track_long, aes(x = step, y = reads, group = sample, color = sample)) +
+    geom_line() +
+    geom_point() +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Read Tracking Through Pipeline",
+         x = "Pipeline Step",
+         y = "Number of Reads")
+  
+  ggsave(file.path(fig_path, "read_tracking.png"), 
+         width = 10, height = 6, dpi = 300)
+}
+```
+
+# Assign Taxonomy
+
+```{r assign-taxonomy}
+if (length(fnFs) > 0) {
+  if (analysis_type == "bacteria") {
+    cat("Assigning bacterial taxonomy using", 
+        config$taxonomy$bacteria$database, "\n")
+    
+    # Check if database files exist
+    db_path <- config$taxonomy$bacteria$silva_train_set
+    if (file.exists(db_path)) {
+      taxa <- assignTaxonomy(
+        seqtab.nochim,
+        db_path,
+        multithread = TRUE
+      )
+      
+      # Add species-level annotation if available
+      species_db <- config$taxonomy$bacteria$silva_species
+      if (file.exists(species_db)) {
+        taxa <- addSpecies(taxa, species_db)
+      }
+    } else {
+      cat("Warning: Database file not found at", db_path, "\n")
+      cat("Creating placeholder taxonomy table\n")
+      taxa <- matrix(
+        "Unassigned",
+        nrow = nrow(seqtab.nochim),
+        ncol = 7
+      )
+      colnames(taxa) <- c("Kingdom", "Phylum", "Class", "Order", 
+                         "Family", "Genus", "Species")
+    }
+    
+  } else if (analysis_type == "fungi") {
+    cat("Assigning fungal taxonomy using", 
+        config$taxonomy$fungi$database, "\n")
+    
+    # Check if database files exist
+    db_path <- config$taxonomy$fungi$unite_train_set
+    if (file.exists(db_path)) {
+      taxa <- assignTaxonomy(
+        seqtab.nochim,
+        db_path,
+        multithread = TRUE
+      )
+    } else {
+      cat("Warning: Database file not found at", db_path, "\n")
+      cat("Creating placeholder taxonomy table\n")
+      taxa <- matrix(
+        "Unassigned",
+        nrow = nrow(seqtab.nochim),
+        ncol = 7
+      )
+      colnames(taxa) <- c("Kingdom", "Phylum", "Class", "Order", 
+                         "Family", "Genus", "Species")
+    }
+  }
+  
+  # Inspect taxonomic assignments
+  cat("\nTaxonomic assignments (first few):\n")
+  print(head(taxa))
+  
+  # Save taxonomy table
+  if (config$output$save_intermediate) {
+    saveRDS(taxa, file.path(output_path, "taxonomy.rds"))
+  }
+}
+```
+
+# Create Phyloseq Object
+
+```{r create-phyloseq}
+if (length(fnFs) > 0) {
+  # Read sample metadata if it exists
+  metadata_file <- config$metadata$file
+  if (file.exists(metadata_file)) {
+    samdf <- read.csv(metadata_file, row.names = 1)
+    cat("Loaded metadata for", nrow(samdf), "samples\n")
+  } else {
+    cat("Warning: Metadata file not found. Creating minimal metadata.\n")
+    samdf <- data.frame(
+      SampleID = sample.names,
+      row.names = sample.names
+    )
+  }
+  
+  # Create phyloseq object
+  ps <- phyloseq(
+    otu_table(seqtab.nochim, taxa_are_rows = FALSE),
+    sample_data(samdf),
+    tax_table(taxa)
+  )
+  
+  cat("\nPhyloseq object summary:\n")
+  print(ps)
+  
+  # Save phyloseq object
+  if (config$output$save_intermediate) {
+    saveRDS(ps, file.path(output_path, "phyloseq_object.rds"))
+  }
+}
+```
+
+# Quality Filtering
+
+```{r quality-filter-phyloseq}
+if (length(fnFs) > 0) {
+  # Remove samples with fewer than minimum reads
+  min_reads <- config$phyloseq$min_reads
+  ps_filtered <- prune_samples(sample_sums(ps) >= min_reads, ps)
+  
+  cat("Samples before filtering:", nsamples(ps), "\n")
+  cat("Samples after filtering (>= ", min_reads, " reads):", 
+      nsamples(ps_filtered), "\n")
+  
+  # Remove low prevalence taxa
+  prev_threshold <- config$phyloseq$prevalence_threshold
+  prevalence <- apply(otu_table(ps_filtered), 2, function(x) sum(x > 0) / length(x))
+  ps_filtered <- prune_taxa(prevalence >= prev_threshold, ps_filtered)
+  
+  cat("Taxa after prevalence filtering (>=", prev_threshold, "):", 
+      ntaxa(ps_filtered), "\n")
+  
+  # Update phyloseq object
+  ps <- ps_filtered
+  
+  # Save filtered phyloseq object
+  if (config$output$save_intermediate) {
+    saveRDS(ps, file.path(output_path, "phyloseq_filtered.rds"))
+  }
+}
+```
+
+# Basic Visualizations
+
+## Alpha Diversity
+
+```{r alpha-diversity, fig.width=10, fig.height=6}
+if (length(fnFs) > 0 && nsamples(ps) > 0) {
+  # Plot alpha diversity
+  p <- plot_richness(ps, measures = c("Shannon", "Simpson", "Chao1")) +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Alpha Diversity Measures")
+  
+  print(p)
+  
+  ggsave(file.path(fig_path, "alpha_diversity.png"), 
+         width = 10, height = 6, dpi = 300)
+}
+```
+
+## Taxonomic Composition
+
+```{r taxonomic-composition, fig.width=10, fig.height=8}
+if (length(fnFs) > 0 && nsamples(ps) > 0) {
+  # Plot taxonomic composition at Phylum level
+  ps_phylum <- tax_glom(ps, "Phylum", NArm = TRUE)
+  
+  p <- plot_bar(ps_phylum, fill = "Phylum") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Taxonomic Composition at Phylum Level",
+         x = "Sample",
+         y = "Abundance")
+  
+  print(p)
+  
+  ggsave(file.path(fig_path, "taxonomic_composition_phylum.png"), 
+         width = 12, height = 8, dpi = 300)
+}
+```
+
+## Ordination
+
+```{r ordination, fig.width=10, fig.height=8}
+if (length(fnFs) > 0 && nsamples(ps) > 1) {
+  # Transform to relative abundance
+  ps_rel <- transform_sample_counts(ps, function(x) x / sum(x))
+  
+  # Perform ordination (PCoA with Bray-Curtis)
+  ord <- ordinate(ps_rel, method = "PCoA", distance = "bray")
+  
+  p <- plot_ordination(ps_rel, ord, type = "samples") +
+    theme_bw() +
+    labs(title = "PCoA Ordination (Bray-Curtis Distance)")
+  
+  print(p)
+  
+  ggsave(file.path(fig_path, "ordination_pcoa.png"), 
+         width = 10, height = 8, dpi = 300)
+}
+```
+
+# Session Information
+
+```{r session-info}
+sessionInfo()
+```
+
+# Summary
+
+This pipeline has completed the following steps:
+
+1. ✓ Quality control and visualization of raw reads
+2. ✓ Filtering and trimming of sequences
+3. ✓ Error rate learning
+4. ✓ Sample inference using DADA2
+5. ✓ Merging of paired-end reads
+6. ✓ Chimera removal
+7. ✓ Taxonomy assignment (bacterial or fungal)
+8. ✓ Phyloseq object creation
+9. ✓ Basic diversity and composition analyses
+
+All output files have been saved to the `output/` directory.

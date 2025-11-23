@@ -1,0 +1,6 @@
+{
+  "r.version": "4.3.3",
+  "snapshot.type": "explicit",
+  "use.cache": true,
+  "vcs.ignore.library": true
+}
