@@ -38,20 +38,16 @@ download_unite() {
     if [ ! -f "sh_general_release_dynamic_s_all_10.05.2021.fasta" ]; then
         echo "Note: UNITE database requires manual download from PlutoF"
         echo "Please visit: https://doi.plutof.ut.ee/doi/10.15156/BIO/2483915"
-        echo "Download the file and place it in the project root directory"
         echo ""
-        echo "Alternative: Download from direct link"
-        wget -q --show-progress https://files.plutof.ut.ee/public/orig/98/AE/98AE96C6593FC9C52D1C46B96C2D9064291F4BCE99C60593BFAD7FA10DF1[...].gz \
-            -O sh_general_release_dynamic_s_all_10.05.2021.fasta.gz || {
-            echo "Direct download failed. Please download manually from PlutoF."
-            return 1
-        }
-        
-        # Uncompress if downloaded
-        if [ -f "sh_general_release_dynamic_s_all_10.05.2021.fasta.gz" ]; then
-            gunzip sh_general_release_dynamic_s_all_10.05.2021.fasta.gz
-            echo "✓ UNITE database downloaded and extracted"
-        fi
+        echo "Download the general FASTA release file and save it as:"
+        echo "  sh_general_release_dynamic_s_all_10.05.2021.fasta"
+        echo ""
+        echo "Or use the DOI to access the latest version:"
+        echo "  https://doi.plutof.ut.ee/doi/10.15156/BIO/2483915"
+        echo ""
+        echo "Note: UNITE files are too large for automated download."
+        echo "After downloading, place the file in the project root directory."
+        return 1
     else
         echo "✓ UNITE database already exists"
     fi

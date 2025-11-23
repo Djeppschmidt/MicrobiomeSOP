@@ -65,6 +65,8 @@ for (pkg in check_packages) {
 
 # Validate config.yaml
 cat("\nValidating configuration...\n")
+config_valid <- FALSE  # Initialize outside of conditional blocks
+
 if (file.exists("config.yaml")) {
   tryCatch({
     config <- yaml::yaml.load_file("config.yaml")
@@ -93,11 +95,12 @@ if (file.exists("config.yaml")) {
     
   }, error = function(e) {
     cat("  ✗ Error reading config.yaml:", e$message, "\n")
-    config_valid <- FALSE
+    config_valid <<- FALSE  # Use <<- to assign to outer scope
   })
 } else {
   cat("  ✗ config.yaml not found\n")
   config_valid <- FALSE
+}
 }
 
 # Summary
@@ -123,7 +126,7 @@ if (all_packages_available) {
   cat("    Run: Rscript scripts/setup_renv.R\n")
 }
 
-if (exists("config_valid") && config_valid) {
+if (config_valid) {
   cat("  ✓ Configuration valid\n")
 } else {
   cat("  ⚠ Configuration needs review\n")
@@ -132,7 +135,7 @@ if (exists("config_valid") && config_valid) {
 cat("\n")
 
 # Final status
-if (all_dirs_exist && all_files_exist && exists("config_valid") && config_valid) {
+if (all_dirs_exist && all_files_exist && config_valid) {
   cat("Pipeline setup is complete! ✓\n")
   cat("\nNext steps:\n")
   cat("  1. Install R packages: Rscript scripts/setup_renv.R\n")
