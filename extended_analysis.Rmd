@@ -434,15 +434,17 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
           tax_top <- as.data.frame(tax_table(ps)[top_taxa, ])
           
           # Create label (use lowest available taxonomic level)
-          tax_labels <- apply(tax_top, 1, function(x) {
-            for (i in length(x):1) {
-              if (!is.na(x[i]) && x[i] != "") {
-                return(paste(names(x)[i], x[i], sep = ":"))
+          tax_labels <- setNames(
+            apply(tax_top, 1, function(x) {
+              for (i in length(x):1) {
+                if (!is.na(x[i]) && x[i] != "") {
+                  return(paste(names(x)[i], x[i], sep = ":"))
+                }
               }
-            }
-            return("Unknown")
-          })
-          names(tax_labels) <- top_taxa
+              return("Unknown")
+            }),
+            top_taxa
+          )
           
           top_counts_df$Taxonomy <- tax_labels[top_counts_df$ASV]
           
