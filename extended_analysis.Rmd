@@ -330,7 +330,7 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
     # Calculate geometric means for normalization
     # (required for samples with zeros)
     gm_mean <- function(x, na.rm = TRUE) {
-      exp(sum(log(x[x > 0]), na.rm = na.rm) / length(x))
+      exp(sum(log(x[x > 0]), na.rm = na.rm) / length(x[x > 0]))
     }
     
     geoMeans <- apply(counts(diagdds), 1, gm_mean)
@@ -453,8 +453,7 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
           )
           
           # Add group information
-          sample_groups <- sample_data_df[, c("Group")]
-          names(sample_groups) <- rownames(sample_data_df)
+          sample_groups <- setNames(sample_data_df$Group, rownames(sample_data_df))
           top_counts_long$Group <- sample_groups[top_counts_long$Sample]
           
           p_bar <- ggplot(top_counts_long, 
