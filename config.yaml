@@ -14,16 +14,16 @@ dada2:
     truncQ: 2             # Truncate reads at first instance of quality score <= truncQ
     rm.phix: TRUE         # Remove PhiX sequences
     compress: TRUE        # Compress output files
-  
+
   # Error learning parameters
   learn_errors:
     nbases: 1e8          # Number of bases to use for error learning
-  
-  # Merging parameters  
+
+  # Merging parameters
   merge:
     minOverlap: 12       # Minimum overlap for merging
     maxMismatch: 0       # Maximum mismatches in overlap region
-  
+
   # Chimera removal
   chimera:
     method: "consensus"  # Method for chimera detection
@@ -35,7 +35,7 @@ taxonomy:
     database: "silva"    # Options: "silva", "greengenes", "rdp"
     silva_train_set: "silva_nr99_v138.1_train_set.fa.gz"
     silva_species: "silva_species_assignment_v138.1.fa.gz"
-  
+
   # Fungal databases (for fungi analysis)
   fungi:
     database: "unite"    # Options: "unite"
@@ -45,6 +45,8 @@ taxonomy:
 metadata:
   file: "data/metadata/sample_metadata.csv"
   sample_id_column: "SampleID"
+  total_abundance_column: "TotalAbundance"
+  treatment_column: "Group"
 
 # Output options
 output:

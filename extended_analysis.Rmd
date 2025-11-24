@@ -17,7 +17,7 @@ knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
 
 This is an example extended analysis script showing additional analyses you can perform after running the main `analysis.Rmd` pipeline. It loads the phyloseq object created by the main pipeline and demonstrates various downstream analyses.
 
-**Prerequisites**: Run `analysis.Rmd` first to generate the phyloseq object.
+**Prerequisites**: Run `analysis.Rmd` first to generate the phyloseq object. And, check the YAML file to make sure your metadata labels are configured correctly.
 
 # Load Libraries and Data
 
@@ -32,6 +32,16 @@ library(QSeq)
 ps <- readRDS("output/phyloseq_filtered.rds")
 
 cat("Loaded phyloseq object:\n")
+
+# load config
+config <- yaml::read_yaml("config.yaml")
+
+# transform samples into quantitative sequence counts; this transformation requires a QPCR or similar data field in the metadata table
+if(any(config$metadata$total_abundance_column %in% colnames(sample_data(ps)))){
+  Q.ps <- QSeq(ps, config$metadata$total_abundance_column)
+} else {print("No metadata column for total abundance. Check YAML file to be sure the name matches exactly.")}
+
+
 print(ps)
 ```
 
@@ -98,7 +108,7 @@ sample_data_df$SampleID <- rownames(sample_data_df)
 alpha_div_merged <- merge(alpha_div, sample_data_df, by = "SampleID")
 
 # Plot by group if available
-if ("Group" %in% colnames(alpha_div_merged)) {
+if ("Group" %in% colnames(alpha_div_merged)) {  # !! set group variable in config object
   library(tidyr)
   alpha_long <- pivot_longer(
     alpha_div_merged,
@@ -306,9 +316,9 @@ write.csv(richness_data, "output/tables/richness_regression.csv", row.names = FA
 cat("\nRichness regression data saved to output/tables/richness_regression.csv\n")
 ```
 
-# Differential Abundance Analysis (DESeq2)
+# Differential Relative Abundance Analysis (DESeq2) & Differential Abundance Analysis
 
-This analysis uses DESeq2 to identify taxa with significantly different abundances between groups, accounting for sequencing depth and variability.
+This analysis uses DESeq2 to identify taxa with significantly different relative abundances between groups, accounting for sequencing depth and variability. 
 
 ```{r deseq2-analysis, fig.width=12, fig.height=10}
 # Check if DESeq2 is available
@@ -514,6 +524,8 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
   }
 }
 ```
+
+# 
 
 # Export Results
 
