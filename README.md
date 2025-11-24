@@ -72,6 +72,9 @@ This dataset contains:
 # Download the dataset
 wget https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip
 unzip miseqsopdata.zip
+
+# Move FASTQ files to data directory
+mkdir -p data/raw
 mv MiSeq_SOP/*fastq.gz data/raw/
 ```
 
