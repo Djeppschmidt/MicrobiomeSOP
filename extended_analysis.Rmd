@@ -703,18 +703,18 @@ if (file.exists("output/tables/deseq2_results.csv") &&
     data$Quant_effect <- ifelse(is.na(data$Quant_padj) | data$Quant_padj >= 0.05, "no_effect",
                                 ifelse(data$Quant_log2FC > 0, "positive", "negative"))
     
-    # Prepare data for DESeq2 (left side, negative values)
+    # Prepare data for DESeq2 (left side - negate values to plot on left)
     deseq2_data <- data.frame(
       TaxLabel = data$TaxLabel,
-      Value = -abs(data$DESeq2_log2FC),  # Negative for left side
+      Value = -data$DESeq2_log2FC,  # Negate to plot on left side
       Effect = data$DESeq2_effect,
       Method = "DESeq2"
     )
     
-    # Prepare data for Quantitative (right side, positive values)
+    # Prepare data for Quantitative (right side - keep positive)
     quant_data <- data.frame(
       TaxLabel = data$TaxLabel,
-      Value = abs(data$Quant_log2FC),  # Positive for right side
+      Value = data$Quant_log2FC,  # Keep positive to plot on right
       Effect = data$Quant_effect,
       Method = "Quantitative"
     )
@@ -743,11 +743,11 @@ if (file.exists("output/tables/deseq2_results.csv") &&
            fill = "Effect Direction") +
       theme(legend.position = "bottom",
             axis.text.y = element_text(size = 8)) +
-      geom_hline(yintercept = 0, linetype = "solid", color = "black", linewidth = 0.5) +
-      annotate("text", x = Inf, y = -max(abs(plot_data$Value), na.rm = TRUE) * 0.8, 
-               label = "DESeq2", hjust = 0, vjust = 1, size = 4, fontface = "bold") +
-      annotate("text", x = Inf, y = max(abs(plot_data$Value), na.rm = TRUE) * 0.8, 
-               label = "Quantitative", hjust = 1, vjust = 1, size = 4, fontface = "bold")
+      geom_vline(xintercept = 0, linetype = "solid", color = "black", linewidth = 0.8) +
+      annotate("text", x = nrow(data), y = min(plot_data$Value, na.rm = TRUE) * 0.8, 
+               label = "DESeq2", hjust = 0.5, vjust = -0.5, size = 5, fontface = "bold") +
+      annotate("text", x = nrow(data), y = max(plot_data$Value, na.rm = TRUE) * 0.8, 
+               label = "Quantitative", hjust = 0.5, vjust = -0.5, size = 5, fontface = "bold")
     
     return(p)
   }
