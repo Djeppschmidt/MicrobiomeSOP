@@ -135,7 +135,9 @@ if ("Group" %in% colnames(alpha_div_merged)) {  # !! set group variable in confi
 dist_matrix <- phyloseq::distance(ps, method = "bray")
 
 # Perform PERMANOVA if groups exist
-if ("Group" %in% colnames(sample_data_df)) {
+if (config$metadata$treatment_column %in% colnames(sample_data_df)) {. #!! test that this actually works to pass the column
+  Group <- config$metadata$treatment_column
+  
   # PERMANOVA test
   permanova_result <- adonis2(dist_matrix ~ Group, 
                               data = sample_data_df, 
@@ -525,7 +527,21 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
 }
 ```
 
-# 
+# Run Quantitative differential abundance
+
+```{r}
+
+```
+
+# compare DESeq2 to Quantitative differential abundance
+
+```{r}
+
+# build data table combining effect size and p-values from DESeq2 and Quantitative differential abundance analysis
+
+# plot effect ratio as a colored butterfly plot. blue is positive effect, red is negative effect, grey is non-significant. Vertical orientation, left side is DESeq2; right side is Quantitative dataset
+
+```
 
 # Export Results
 
