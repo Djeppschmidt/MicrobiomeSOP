@@ -529,8 +529,111 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
 
 # Run Quantitative differential abundance
 
-```{r}
-
+```{r quantitative-anova}
+# Check if Q.ps exists
+if (exists("Q.ps")) {
+  # Get treatment column from config
+  treatment_col <- config$metadata$treatment_column
+  
+  # Extract OTU table and sample data
+  otu_mat <- as.matrix(otu_table(Q.ps))
+  sample_df <- as.data.frame(sample_data(Q.ps))
+  
+  # Check if treatment column exists in metadata
+  if (treatment_col %in% colnames(sample_df)) {
+    # Get treatment groups
+    treatment <- sample_df[[treatment_col]]
+    
+    # Check if we have at least 2 groups
+    if (length(unique(treatment)) >= 2) {
+      # Initialize results list
+      anova_results <- list()
+      
+      # Apply ANOVA to each taxon
+      for (i in 1:nrow(otu_mat)) {
+        taxon_name <- rownames(otu_mat)[i]
+        taxon_abundance <- otu_mat[i, ]
+        
+        # Create data frame for ANOVA
+        anova_df <- data.frame(
+          abundance = taxon_abundance,
+          treatment = treatment
+        )
+        
+        # Run ANOVA
+        anova_model <- aov(abundance ~ treatment, data = anova_df)
+        anova_summary <- summary(anova_model)
+        
+        # Extract p-value
+        p_value <- anova_summary[[1]]$`Pr(>F)`[1]
+        
+        # Calculate group means for effect direction
+        group_means <- tapply(taxon_abundance, treatment, mean)
+        
+        # Effect direction: which group has highest mean
+        max_group <- names(which.max(group_means))
+        min_group <- names(which.min(group_means))
+        
+        # Effect magnitude: difference in means (log2 fold change style)
+        # Using the two most extreme groups
+        max_mean <- max(group_means)
+        min_mean <- min(group_means)
+        
+        # Calculate log2 fold change (add pseudocount to avoid log(0))
+        pseudocount <- 1
+        log2fc <- log2((max_mean + pseudocount) / (min_mean + pseudocount))
+        
+        # Effect size (eta-squared)
+        ss_treatment <- anova_summary[[1]]$`Sum Sq`[1]
+        ss_total <- sum(anova_summary[[1]]$`Sum Sq`)
+        eta_squared <- ss_treatment / ss_total
+        
+        # Store results
+        anova_results[[i]] <- data.frame(
+          Taxon = taxon_name,
+          F_statistic = anova_summary[[1]]$`F value`[1],
+          p_value = p_value,
+          adjusted_p_value = NA,  # Will be calculated later
+          log2_fold_change = log2fc,
+          eta_squared = eta_squared,
+          max_group = max_group,
+          min_group = min_group,
+          max_mean = max_mean,
+          min_mean = min_mean,
+          stringsAsFactors = FALSE
+        )
+      }
+      
+      # Combine results into a data table
+      quantitative_anova_table <- do.call(rbind, anova_results)
+      
+      # Apply multiple testing correction
+      quantitative_anova_table$adjusted_p_value <- p.adjust(quantitative_anova_table$p_value, method = "BH")
+      
+      # Add significance indicator
+      quantitative_anova_table$significant <- quantitative_anova_table$adjusted_p_value < 0.05
+      
+      # Sort by p-value
+      quantitative_anova_table <- quantitative_anova_table[order(quantitative_anova_table$p_value), ]
+      
+      # Print summary
+      cat("Quantitative ANOVA Analysis Summary:\n")
+      cat(sprintf("Total taxa tested: %d\n", nrow(quantitative_anova_table)))
+      cat(sprintf("Significant taxa (adjusted p < 0.05): %d\n", 
+                  sum(quantitative_anova_table$significant, na.rm = TRUE)))
+      cat("\nTop 10 most significant taxa:\n")
+      print(head(quantitative_anova_table, 10))
+      
+    } else {
+      cat("Need at least 2 groups for ANOVA analysis.\n")
+    }
+  } else {
+    cat(sprintf("Treatment column '%s' not found in sample metadata.\n", treatment_col))
+    cat("Available columns: ", paste(colnames(sample_df), collapse = ", "), "\n")
+  }
+} else {
+  cat("Q.ps object not found. Make sure the quantitative phyloseq object was created successfully.\n")
+}
 ```
 
 # compare DESeq2 to Quantitative differential abundance
