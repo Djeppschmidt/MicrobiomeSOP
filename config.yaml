@@ -1,0 +1,62 @@
+# Configuration file for microbiome sequence analysis pipeline
+# Edit these parameters according to your experiment
+
+# Analysis type: "bacteria" or "fungi"
+analysis_type: "bacteria"
+
+# DADA2 parameters
+dada2:
+  # Quality filtering parameters
+  filter:
+    truncLen: [240, 160]  # Forward and reverse truncation lengths
+    maxN: 0               # Max number of Ns allowed
+    maxEE: [2, 2]         # Max expected errors (forward, reverse)
+    truncQ: 2             # Truncate reads at first instance of quality score <= truncQ
+    rm.phix: TRUE         # Remove PhiX sequences
+    compress: TRUE        # Compress output files
+
+  # Error learning parameters
+  learn_errors:
+    nbases: 1e8          # Number of bases to use for error learning
+
+  # Merging parameters
+  merge:
+    minOverlap: 12       # Minimum overlap for merging
+    maxMismatch: 0       # Maximum mismatches in overlap region
+
+  # Chimera removal
+  chimera:
+    method: "consensus"  # Method for chimera detection
+
+# Taxonomy assignment
+taxonomy:
+  # Bacterial databases (for bacteria analysis)
+  bacteria:
+    database: "silva"    # Options: "silva", "greengenes", "rdp"
+    silva_train_set: "silva_nr99_v138.1_train_set.fa.gz"
+    silva_species: "silva_species_assignment_v138.1.fa.gz"
+
+  # Fungal databases (for fungi analysis)
+  fungi:
+    database: "unite"    # Options: "unite"
+    unite_train_set: "sh_general_release_dynamic_s_all_10.05.2021.fasta"
+
+# Sample metadata
+metadata:
+  file: "data/metadata/sample_metadata.csv"
+  sample_id_column: "SampleID"
+  total_abundance_column: "TotalAbundance"
+  treatment_column: "Group"
+
+# Output options
+output:
+  save_intermediate: TRUE  # Save intermediate RDS files
+  figures_format: "png"    # Options: "png", "pdf", "both"
+  figure_width: 10
+  figure_height: 8
+  figure_dpi: 300
+
+# Phyloseq options
+phyloseq:
+  min_reads: 1000       # Minimum reads per sample to keep
+  prevalence_threshold: 0.05  # Minimum proportion of samples taxa must appear in

@@ -1,0 +1,9 @@
+SampleID,Group,Treatment,Timepoint
+Sample1,Control,None,T0
+Sample2,Control,None,T0
+Sample3,Treatment,AntibioticA,T0
+Sample4,Treatment,AntibioticA,T0
+Sample5,Control,None,T1
+Sample6,Control,None,T1
+Sample7,Treatment,AntibioticA,T1
+Sample8,Treatment,AntibioticA,T1
