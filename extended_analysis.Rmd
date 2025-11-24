@@ -616,8 +616,18 @@ if (exists("Q.ps")) {
       # Sort by p-value
       quantitative_anova_table <- quantitative_anova_table[order(quantitative_anova_table$p_value), ]
       
+      # Save results to file
+      output_dir <- "output/tables"
+      if (!dir.exists(output_dir)) {
+        dir.create(output_dir, recursive = TRUE)
+      }
+      write.csv(quantitative_anova_table, 
+                file.path(output_dir, "quantitative_anova_results.csv"), 
+                row.names = FALSE)
+      cat(sprintf("Results saved to %s\n", file.path(output_dir, "quantitative_anova_results.csv")))
+      
       # Print summary
-      cat("Quantitative ANOVA Analysis Summary:\n")
+      cat("\nQuantitative ANOVA Analysis Summary:\n")
       cat(sprintf("Total taxa tested: %d\n", nrow(quantitative_anova_table)))
       cat(sprintf("Significant taxa (adjusted p < 0.05): %d\n", 
                   sum(quantitative_anova_table$significant, na.rm = TRUE)))
