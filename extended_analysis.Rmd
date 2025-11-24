@@ -736,6 +736,7 @@ if (file.exists("output/tables/deseq2_results.csv") &&
                                  "negative" = "Negative effect",
                                  "no_effect" = "No effect")) +
       coord_flip() +
+      geom_hline(yintercept = 0, linetype = "solid", color = "black", linewidth = 0.8) +
       theme_bw() +
       labs(title = title,
            x = "Taxon",
@@ -743,10 +744,9 @@ if (file.exists("output/tables/deseq2_results.csv") &&
            fill = "Effect Direction") +
       theme(legend.position = "bottom",
             axis.text.y = element_text(size = 8)) +
-      geom_vline(xintercept = 0, linetype = "solid", color = "black", linewidth = 0.8) +
-      annotate("text", x = nrow(data), y = min(plot_data$Value, na.rm = TRUE) * 0.8, 
+      annotate("text", y = min(plot_data$Value, na.rm = TRUE) * 0.8, x = nrow(data), 
                label = "DESeq2", hjust = 0.5, vjust = -0.5, size = 5, fontface = "bold") +
-      annotate("text", x = nrow(data), y = max(plot_data$Value, na.rm = TRUE) * 0.8, 
+      annotate("text", y = max(plot_data$Value, na.rm = TRUE) * 0.8, x = nrow(data), 
                label = "Quantitative", hjust = 0.5, vjust = -0.5, size = 5, fontface = "bold")
     
     return(p)
