@@ -1,6 +1,6 @@
 ---
-title: "Microbiome Sequence Analysis Pipeline"
-author: "MicrobiomeSOP"
+title: "Microbiome Sequence Analysis Pipeline - MicrobiomeSOP"
+author: "Dietrich Epp Schmidt"
 date: "`r Sys.Date()`"
 output:
   html_document:

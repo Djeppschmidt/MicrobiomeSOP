@@ -32,12 +32,14 @@ packages <- c(
   "tidyr",      # CRAN
   "knitr",      # CRAN
   "rmarkdown",  # CRAN
-  "vegan"       # CRAN - for diversity analyses
+  "vegan",       # CRAN - for diversity analyses
+  "devtools"    #CRAN
 )
 
 # Separate Bioconductor packages from CRAN packages
 bioc_packages <- c("dada2", "phyloseq", "DESeq2")
 cran_packages <- setdiff(packages, bioc_packages)
+github_packages <- c("djeppschmidt/QSeq")
 
 # Install CRAN packages
 if (length(cran_packages) > 0) {
@@ -48,6 +50,9 @@ if (length(cran_packages) > 0) {
 if (length(bioc_packages) > 0) {
   BiocManager::install(bioc_packages, update = FALSE, ask = FALSE)
 }
+
+# Install GitHub packages
+install_github(github_packages)
 
 # Take snapshot
 cat("\nCreating renv snapshot...\n")

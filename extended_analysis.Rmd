@@ -1,6 +1,6 @@
 ---
-title: "Extended Microbiome Analysis"
-author: "MicrobiomeSOP"
+title: "Extended Microbiome Analysis - MicrobiomeSOP"
+author: "Dietrich Epp Schmidt"
 date: "`r Sys.Date()`"
 output:
   html_document:
@@ -26,6 +26,7 @@ library(phyloseq)
 library(ggplot2)
 library(dplyr)
 library(vegan)
+library(QSeq)
 
 # Load the filtered phyloseq object from main analysis
 ps <- readRDS("output/phyloseq_filtered.rds")
