@@ -1,0 +1,706 @@
+---
+title: "Extended Microbiome Analysis - MicrobiomeSOP"
+author: "Dietrich Epp Schmidt"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+This is an example extended analysis script showing additional analyses you can perform after running the main `analysis.Rmd` pipeline. It loads the phyloseq object created by the main pipeline and demonstrates various downstream analyses.
+
+**Prerequisites**: Run `analysis.Rmd` first to generate the phyloseq object. And, check the YAML file to make sure your metadata labels are configured correctly.
+
+# Load Libraries and Data
+
+```{r load-data}
+library(phyloseq)
+library(ggplot2)
+library(dplyr)
+library(vegan)
+library(QSeq)
+
+# Load the filtered phyloseq object from main analysis
+ps <- readRDS("output/phyloseq_filtered.rds")
+
+cat("Loaded phyloseq object:\n")
+
+# load config
+config <- yaml::read_yaml("config.yaml")
+
+# transform samples into quantitative sequence counts; this transformation requires a QPCR or similar data field in the metadata table
+if(any(config$metadata$total_abundance_column %in% colnames(sample_data(ps)))){
+  Q.ps <- QSeq(ps, config$metadata$total_abundance_column)
+} else {print("No metadata column for total abundance. Check YAML file to be sure the name matches exactly.")}
+
+
+print(ps)
+```
+
+# Data Exploration
+
+## Sample Summary
+
+```{r sample-summary}
+# Get sample sums
+sample_sums_df <- data.frame(
+  SampleID = sample_names(ps),
+  ReadCount = sample_sums(ps)
+)
+
+# Summary statistics
+cat("Read count summary:\n")
+summary(sample_sums_df$ReadCount)
+
+# Visualize
+ggplot(sample_sums_df, aes(x = reorder(SampleID, ReadCount), y = ReadCount)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Total Reads per Sample",
+       x = "Sample",
+       y = "Read Count") +
+  geom_hline(yintercept = median(sample_sums_df$ReadCount), 
+             linetype = "dashed", color = "red")
+```
+
+## Taxonomy Summary
+
+```{r taxonomy-summary}
+# Count taxa at each level
+tax_table_df <- as.data.frame(tax_table(ps))
+
+for (rank in c("Phylum", "Class", "Order", "Family", "Genus")) {
+  if (rank %in% colnames(tax_table_df)) {
+    n_unique <- length(unique(tax_table_df[[rank]]))
+    cat(sprintf("Number of unique %s: %d\n", rank, n_unique))
+  }
+}
+
+# Most abundant phyla
+if ("Phylum" %in% colnames(tax_table_df)) {
+  phylum_counts <- table(tax_table_df$Phylum)
+  cat("\nTop 10 most abundant phyla (by number of ASVs):\n")
+  print(head(sort(phylum_counts, decreasing = TRUE), 10))
+}
+```
+
+# Advanced Diversity Analysis
+
+## Alpha Diversity by Group
+
+```{r alpha-by-group, fig.width=10, fig.height=6}
+# Calculate diversity indices
+alpha_div <- estimate_richness(ps, measures = c("Shannon", "Simpson", "Chao1"))
+alpha_div$SampleID <- rownames(alpha_div)
+
+# Merge with sample data
+sample_data_df <- as.data.frame(sample_data(ps))
+sample_data_df$SampleID <- rownames(sample_data_df)
+alpha_div_merged <- merge(alpha_div, sample_data_df, by = "SampleID")
+
+# Plot by group if available
+if ("Group" %in% colnames(alpha_div_merged)) {  # !! set group variable in config object
+  library(tidyr)
+  alpha_long <- pivot_longer(
+    alpha_div_merged,
+    cols = c("Shannon", "Simpson", "Chao1"),
+    names_to = "Metric",
+    values_to = "Value"
+  )
+  
+  ggplot(alpha_long, aes(x = Group, y = Value, fill = Group)) +
+    geom_boxplot() +
+    facet_wrap(~Metric, scales = "free_y") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Alpha Diversity by Group",
+         x = "Group",
+         y = "Diversity Value")
+}
+```
+
+## Beta Diversity Analysis
+
+```{r beta-diversity, fig.width=10, fig.height=8}
+# Calculate distance matrix
+dist_matrix <- phyloseq::distance(ps, method = "bray")
+
+# Perform PERMANOVA if groups exist
+if (config$metadata$treatment_column %in% colnames(sample_data_df)) {. #!! test that this actually works to pass the column
+  Group <- config$metadata$treatment_column
+  
+  # PERMANOVA test
+  permanova_result <- adonis2(dist_matrix ~ Group, 
+                              data = sample_data_df, 
+                              permutations = 999)
+  
+  cat("PERMANOVA Results:\n")
+  print(permanova_result)
+  
+  # Test for homogeneity of dispersion
+  beta_disp <- betadisper(dist_matrix, sample_data_df$Group)
+  cat("\nBeta Dispersion Test:\n")
+  print(permutest(beta_disp, permutations = 999))
+}
+
+# PCoA with improved visualization
+pcoa <- ordinate(ps, method = "PCoA", distance = "bray")
+
+# Plot with variance explained
+p <- plot_ordination(ps, pcoa, type = "samples", color = "Group") +
+  theme_bw() +
+  labs(title = "PCoA Ordination - Bray-Curtis Distance")
+
+if ("Group" %in% colnames(sample_data_df)) {
+  p <- p + stat_ellipse(aes(color = Group), type = "t", level = 0.95)
+}
+
+print(p)
+```
+
+# Taxonomic Analysis
+
+## Relative Abundance
+
+```{r relative-abundance, fig.width=12, fig.height=8}
+# Transform to relative abundance
+ps_rel <- transform_sample_counts(ps, function(x) x / sum(x) * 100)
+
+# Get top taxa at Genus level
+top_genera <- names(sort(taxa_sums(ps_rel), decreasing = TRUE)[1:20])
+ps_top <- prune_taxa(top_genera, ps_rel)
+
+# Melt for plotting
+ps_melt <- psmelt(ps_top)
+
+if ("Genus" %in% colnames(ps_melt)) {
+  ggplot(ps_melt, aes(x = Sample, y = Abundance, fill = Genus)) +
+    geom_bar(stat = "identity") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Top 20 Genera - Relative Abundance",
+         x = "Sample",
+         y = "Relative Abundance (%)") +
+    scale_fill_manual(values = rainbow(20))
+}
+```
+
+## Heatmap of Top Taxa
+
+```{r heatmap, fig.width=10, fig.height=8}
+# Create heatmap of top 30 taxa
+top_30 <- names(sort(taxa_sums(ps), decreasing = TRUE)[1:30])
+ps_top30 <- prune_taxa(top_30, ps)
+ps_top30_rel <- transform_sample_counts(ps_top30, function(x) x / sum(x) * 100)
+
+plot_heatmap(ps_top30_rel, 
+             method = "PCoA", 
+             distance = "bray",
+             taxa.label = "Genus",
+             taxa.order = "Genus",
+             low = "white", 
+             high = "darkblue") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(title = "Heatmap of Top 30 Taxa")
+```
+
+# Network Analysis
+
+```{r network, fig.width=10, fig.height=10}
+# Create network plot
+# Note: This is computationally intensive for large datasets
+if (ntaxa(ps) < 100) {
+  net <- make_network(ps, type = "taxa", distance = "bray", max.dist = 0.3)
+  plot_network(net, ps, 
+               type = "taxa", 
+               color = "Phylum",
+               point_size = 3) +
+    theme_void() +
+    labs(title = "Taxa Co-occurrence Network")
+} else {
+  cat("Dataset too large for network analysis. Consider subsetting.\n")
+}
+```
+
+# Richness Regression Analysis
+
+This analysis models richness while accounting for sequencing depth using regression residuals.
+
+```{r richness-regression, fig.width=10, fig.height=8}
+# Calculate observed richness and sequencing depth
+richness_data <- data.frame(
+  SampleID = sample_names(ps),
+  ObservedRichness = estimate_richness(ps, measures = "Observed")$Observed,
+  SequencingDepth = sample_sums(ps)
+)
+
+# Merge with sample metadata if available
+sample_data_df <- as.data.frame(sample_data(ps))
+sample_data_df$SampleID <- rownames(sample_data_df)
+richness_data <- merge(richness_data, sample_data_df, by = "SampleID", all.x = TRUE)
+
+# Fit linear regression: Richness ~ Sequencing Depth
+richness_model <- lm(ObservedRichness ~ SequencingDepth, data = richness_data)
+
+cat("Regression Model Summary:\n")
+cat("=========================\n")
+print(summary(richness_model))
+
+# Calculate residuals (depth-corrected richness)
+richness_data$Residuals <- residuals(richness_model)
+richness_data$FittedValues <- fitted(richness_model)
+
+# Visualize the regression
+p1 <- ggplot(richness_data, aes(x = SequencingDepth, y = ObservedRichness)) +
+  geom_point(size = 3, alpha = 0.6) +
+  geom_smooth(method = "lm", se = TRUE, color = "blue") +
+  theme_bw() +
+  labs(title = "Richness vs Sequencing Depth",
+       x = "Sequencing Depth (Total Reads)",
+       y = "Observed Richness")
+
+print(p1)
+
+# Plot residuals
+p2 <- ggplot(richness_data, aes(x = FittedValues, y = Residuals)) +
+  geom_point(size = 3, alpha = 0.6) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_smooth(se = TRUE, color = "blue") +
+  theme_bw() +
+  labs(title = "Residuals vs Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals (Depth-Corrected Richness)")
+
+print(p2)
+
+# Test residuals by group if Group variable exists
+if ("Group" %in% colnames(richness_data)) {
+  cat("\n\nTesting Depth-Corrected Richness by Group:\n")
+  cat("==========================================\n")
+  
+  # ANOVA on residuals
+  residual_anova <- aov(Residuals ~ Group, data = richness_data)
+  print(summary(residual_anova))
+  
+  # Visualize residuals by group
+  p3 <- ggplot(richness_data, aes(x = Group, y = Residuals, fill = Group)) +
+    geom_boxplot(alpha = 0.7) +
+    geom_jitter(width = 0.2, alpha = 0.5) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Depth-Corrected Richness by Group",
+         x = "Group",
+         y = "Residuals (Depth-Corrected Richness)",
+         caption = "Positive residuals = higher than expected richness for sequencing depth")
+  
+  print(p3)
+  
+  # Pairwise comparisons if more than 2 groups
+  if (length(unique(richness_data$Group)) > 2) {
+    cat("\n\nPairwise Comparisons (Tukey HSD):\n")
+    tukey_result <- stats::TukeyHSD(residual_anova)
+    print(tukey_result)
+  }
+}
+
+# Save richness regression data
+write.csv(richness_data, "output/tables/richness_regression.csv", row.names = FALSE)
+cat("\nRichness regression data saved to output/tables/richness_regression.csv\n")
+```
+
+# Differential Relative Abundance Analysis (DESeq2) & Differential Abundance Analysis
+
+This analysis uses DESeq2 to identify taxa with significantly different relative abundances between groups, accounting for sequencing depth and variability. 
+
+```{r deseq2-analysis, fig.width=12, fig.height=10}
+# Check if DESeq2 is available
+if (!requireNamespace("DESeq2", quietly = TRUE)) {
+  cat("DESeq2 package not installed. Install with:\n")
+  cat("BiocManager::install('DESeq2')\n")
+  cat("Skipping differential abundance analysis.\n")
+} else {
+  library(DESeq2)
+  
+  # Check if Group variable exists
+  if ("Group" %in% colnames(sample_data_df)) {
+    cat("Performing DESeq2 differential abundance analysis...\n")
+    cat("===================================================\n\n")
+    
+    # Convert phyloseq to DESeq2 format
+    # DESeq2 requires integer counts
+    diagdds <- phyloseq_to_deseq2(ps, ~ Group)
+    
+    # Calculate geometric means for normalization
+    # Geometric mean calculation that handles zero values by excluding them,
+    # which is necessary for DESeq2 size factor estimation. Returns 0 if all values are zero.
+    gm_mean <- function(x, na.rm = TRUE) {
+      if (length(x[x > 0]) == 0) return(0)
+      exp(sum(log(x[x > 0]), na.rm = na.rm) / length(x[x > 0]))
+    }
+    
+    geoMeans <- apply(counts(diagdds), 1, gm_mean)
+    diagdds <- estimateSizeFactors(diagdds, geoMeans = geoMeans)
+    
+    # Run DESeq2 analysis
+    # Using fitType = "local" for more robust dispersion estimation,
+    # which is better suited for datasets with small sample sizes or outliers
+    diagdds <- DESeq(diagdds, fitType = "local", quiet = TRUE)
+    
+    cat("DESeq2 analysis complete.\n\n")
+    
+    # Extract results
+    # Get contrasts (comparing first two groups)
+    groups <- unique(sample_data_df$Group)
+    if (length(groups) >= 2) {
+      contrast_name <- paste(groups[1], "vs", groups[2])
+      cat("Contrast:", contrast_name, "\n\n")
+      
+      res <- results(diagdds, contrast = c("Group", groups[1], groups[2]))
+      
+      # Order by adjusted p-value
+      res_ordered <- res[order(res$padj, na.last = NA), ]
+      
+      # Summary
+      cat("DESeq2 Results Summary:\n")
+      print(summary(res))
+      
+      # Filter significant results (adjusted p-value < 0.05)
+      alpha <- 0.05
+      sig_res <- res_ordered[which(res_ordered$padj < alpha), ]
+      
+      cat("\n\nNumber of significant taxa (padj <", alpha, "):", nrow(sig_res), "\n")
+      
+      if (nrow(sig_res) > 0) {
+        cat("\nTop 10 most significant taxa:\n")
+        cat("==============================\n")
+        
+        # Get taxonomy for significant results
+        sig_taxa <- rownames(sig_res)[1:min(10, nrow(sig_res))]
+        tax_sig <- as.data.frame(tax_table(ps)[sig_taxa, ])
+        
+        # Combine with DESeq2 results
+        sig_results_table <- cbind(
+          tax_sig,
+          baseMean = sig_res[sig_taxa, "baseMean"],
+          log2FoldChange = sig_res[sig_taxa, "log2FoldChange"],
+          padj = sig_res[sig_taxa, "padj"]
+        )
+        
+        print(sig_results_table)
+        
+        # Volcano plot
+        res_df <- as.data.frame(res)
+        res_df$significant <- ifelse(res_df$padj < alpha & !is.na(res_df$padj), 
+                                     "Significant", "Not Significant")
+        
+        p_volcano <- ggplot(res_df, aes(x = log2FoldChange, y = -log10(padj))) +
+          geom_point(aes(color = significant), alpha = 0.6, size = 2) +
+          scale_color_manual(values = c("Not Significant" = "gray", 
+                                       "Significant" = "red")) +
+          geom_vline(xintercept = c(-1, 1), linetype = "dashed", alpha = 0.5) +
+          geom_hline(yintercept = -log10(alpha), linetype = "dashed", alpha = 0.5) +
+          theme_bw() +
+          labs(title = paste("Volcano Plot:", contrast_name),
+               x = "Log2 Fold Change",
+               y = "-Log10 Adjusted P-value",
+               color = "Status") +
+          theme(legend.position = "bottom")
+        
+        print(p_volcano)
+        
+        # MA plot
+        p_ma <- ggplot(res_df, aes(x = log10(baseMean), y = log2FoldChange)) +
+          geom_point(aes(color = significant), alpha = 0.6, size = 2) +
+          scale_color_manual(values = c("Not Significant" = "gray", 
+                                       "Significant" = "red")) +
+          geom_hline(yintercept = 0, linetype = "dashed", color = "blue") +
+          theme_bw() +
+          labs(title = paste("MA Plot:", contrast_name),
+               x = "Log10 Mean Abundance",
+               y = "Log2 Fold Change",
+               color = "Status") +
+          theme(legend.position = "bottom")
+        
+        print(p_ma)
+        
+        # Bar plot of top significant taxa
+        if (nrow(sig_res) > 0) {
+          top_n <- min(20, nrow(sig_res))
+          top_taxa <- rownames(sig_res)[1:top_n]
+          
+          # Get normalized counts
+          normalized_counts <- counts(diagdds, normalized = TRUE)
+          top_counts <- normalized_counts[top_taxa, , drop = FALSE]
+          
+          # Create data frame for plotting
+          top_counts_df <- as.data.frame(top_counts)
+          top_counts_df$ASV <- rownames(top_counts_df)
+          
+          # Add taxonomy
+          tax_top <- as.data.frame(tax_table(ps)[top_taxa, ])
+          
+          # Create label (use lowest available taxonomic level)
+          # Iterates from most specific (Species) to least specific (Kingdom)
+          # to find the lowest non-empty taxonomic classification for each ASV
+          tax_labels <- setNames(
+            apply(tax_top, 1, function(x) {
+              for (i in length(x):1) {
+                if (!is.na(x[i]) && x[i] != "") {
+                  return(paste(names(x)[i], x[i], sep = ":"))
+                }
+              }
+              return("Unknown")
+            }),
+            top_taxa
+          )
+          
+          top_counts_df$Taxonomy <- tax_labels[top_counts_df$ASV]
+          
+          # Melt for plotting
+          top_counts_long <- tidyr::pivot_longer(
+            top_counts_df,
+            cols = -c(ASV, Taxonomy),
+            names_to = "Sample",
+            values_to = "Abundance"
+          )
+          
+          # Add group information
+          sample_groups <- setNames(sample_data_df$Group, rownames(sample_data_df))
+          top_counts_long$Group <- sample_groups[top_counts_long$Sample]
+          
+          p_bar <- ggplot(top_counts_long, 
+                         aes(x = Taxonomy, y = Abundance, fill = Group)) +
+            geom_bar(stat = "summary", fun = "mean", position = "dodge") +
+            geom_errorbar(stat = "summary", fun.data = "mean_se", 
+                         position = position_dodge(width = 0.9), width = 0.2) +
+            theme_bw() +
+            theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8)) +
+            labs(title = paste("Top", top_n, "Differentially Abundant Taxa"),
+                 x = "Taxon",
+                 y = "Mean Normalized Abundance",
+                 caption = paste("Error bars represent standard error;", 
+                               contrast_name))
+          
+          print(p_bar)
+        }
+        
+        # Export results
+        res_export <- as.data.frame(res)
+        res_export$ASV <- rownames(res_export)
+        
+        # Add taxonomy
+        tax_all <- as.data.frame(tax_table(ps))
+        res_export <- merge(res_export, tax_all, by.x = "ASV", by.y = "row.names", all.x = TRUE)
+        
+        # Reorder columns
+        res_export <- res_export[order(res_export$padj, na.last = NA), ]
+        
+        write.csv(res_export, "output/tables/deseq2_results.csv", row.names = FALSE)
+        cat("\n\nDESeq2 results saved to output/tables/deseq2_results.csv\n")
+        
+        # Export significant results only
+        if (nrow(sig_res) > 0) {
+          sig_export <- res_export[res_export$padj < alpha & !is.na(res_export$padj), ]
+          write.csv(sig_export, "output/tables/deseq2_significant.csv", row.names = FALSE)
+          cat("Significant results saved to output/tables/deseq2_significant.csv\n")
+        }
+      } else {
+        cat("\nNo significant differentially abundant taxa found at alpha =", alpha, "\n")
+      }
+    } else {
+      cat("Need at least 2 groups for differential abundance analysis.\n")
+    }
+  } else {
+    cat("No 'Group' variable found in sample metadata.\n")
+    cat("Differential abundance analysis requires group information.\n")
+  }
+}
+```
+
+# Run Quantitative differential abundance
+
+```{r quantitative-anova}
+# Check if Q.ps exists
+if (exists("Q.ps")) {
+  # Get treatment column from config
+  treatment_col <- config$metadata$treatment_column
+  
+  # Extract OTU table and sample data
+  otu_mat <- as.matrix(otu_table(Q.ps))
+  sample_df <- as.data.frame(sample_data(Q.ps))
+  
+  # Check if treatment column exists in metadata
+  if (treatment_col %in% colnames(sample_df)) {
+    # Get treatment groups
+    treatment <- sample_df[[treatment_col]]
+    
+    # Check if we have at least 2 groups
+    if (length(unique(treatment)) >= 2) {
+      # Initialize results list
+      anova_results <- list()
+      
+      # Apply ANOVA to each taxon
+      for (i in 1:nrow(otu_mat)) {
+        taxon_name <- rownames(otu_mat)[i]
+        taxon_abundance <- otu_mat[i, ]
+        
+        # Create data frame for ANOVA
+        anova_df <- data.frame(
+          abundance = taxon_abundance,
+          treatment = treatment
+        )
+        
+        # Run ANOVA
+        anova_model <- aov(abundance ~ treatment, data = anova_df)
+        anova_summary <- summary(anova_model)
+        
+        # Extract p-value
+        p_value <- anova_summary[[1]]$`Pr(>F)`[1]
+        
+        # Calculate group means for effect direction
+        group_means <- tapply(taxon_abundance, treatment, mean)
+        
+        # Effect direction: which group has highest mean
+        max_group <- names(which.max(group_means))
+        min_group <- names(which.min(group_means))
+        
+        # Effect magnitude: difference in means (log2 fold change style)
+        # Using the two most extreme groups
+        max_mean <- max(group_means)
+        min_mean <- min(group_means)
+        
+        # Calculate log2 fold change (add pseudocount to avoid log(0))
+        pseudocount <- 1
+        log2fc <- log2((max_mean + pseudocount) / (min_mean + pseudocount))
+        
+        # Effect size (eta-squared)
+        ss_treatment <- anova_summary[[1]]$`Sum Sq`[1]
+        ss_total <- sum(anova_summary[[1]]$`Sum Sq`)
+        eta_squared <- ss_treatment / ss_total
+        
+        # Store results
+        anova_results[[i]] <- data.frame(
+          Taxon = taxon_name,
+          F_statistic = anova_summary[[1]]$`F value`[1],
+          p_value = p_value,
+          adjusted_p_value = NA,  # Will be calculated later
+          log2_fold_change = log2fc,
+          eta_squared = eta_squared,
+          max_group = max_group,
+          min_group = min_group,
+          max_mean = max_mean,
+          min_mean = min_mean,
+          stringsAsFactors = FALSE
+        )
+      }
+      
+      # Combine results into a data table
+      quantitative_anova_table <- do.call(rbind, anova_results)
+      
+      # Apply multiple testing correction
+      quantitative_anova_table$adjusted_p_value <- p.adjust(quantitative_anova_table$p_value, method = "BH")
+      
+      # Add significance indicator
+      quantitative_anova_table$significant <- quantitative_anova_table$adjusted_p_value < 0.05
+      
+      # Sort by p-value
+      quantitative_anova_table <- quantitative_anova_table[order(quantitative_anova_table$p_value), ]
+      
+      # Save results to file
+      output_dir <- "output/tables"
+      if (!dir.exists(output_dir)) {
+        dir.create(output_dir, recursive = TRUE)
+      }
+      write.csv(quantitative_anova_table, 
+                file.path(output_dir, "quantitative_anova_results.csv"), 
+                row.names = FALSE)
+      cat(sprintf("Results saved to %s\n", file.path(output_dir, "quantitative_anova_results.csv")))
+      
+      # Print summary
+      cat("\nQuantitative ANOVA Analysis Summary:\n")
+      cat(sprintf("Total taxa tested: %d\n", nrow(quantitative_anova_table)))
+      cat(sprintf("Significant taxa (adjusted p < 0.05): %d\n", 
+                  sum(quantitative_anova_table$significant, na.rm = TRUE)))
+      cat("\nTop 10 most significant taxa:\n")
+      print(head(quantitative_anova_table, 10))
+      
+    } else {
+      cat("Need at least 2 groups for ANOVA analysis.\n")
+    }
+  } else {
+    cat(sprintf("Treatment column '%s' not found in sample metadata.\n", treatment_col))
+    cat("Available columns: ", paste(colnames(sample_df), collapse = ", "), "\n")
+  }
+} else {
+  cat("Q.ps object not found. Make sure the quantitative phyloseq object was created successfully.\n")
+}
+```
+
+# compare DESeq2 to Quantitative differential abundance
+
+```{r}
+
+# build data table combining effect size and p-values from DESeq2 and Quantitative differential abundance analysis
+
+# plot effect ratio as a colored butterfly plot. blue is positive effect, red is negative effect, grey is non-significant. Vertical orientation, left side is DESeq2; right side is Quantitative dataset
+
+```
+
+# Export Results
+
+```{r export-results}
+# Export OTU table
+otu_table_export <- as.data.frame(otu_table(ps))
+write.csv(otu_table_export, "output/tables/otu_table.csv")
+
+# Export taxonomy table
+tax_table_export <- as.data.frame(tax_table(ps))
+write.csv(tax_table_export, "output/tables/taxonomy_table.csv")
+
+# Export sample data
+sample_data_export <- as.data.frame(sample_data(ps))
+write.csv(sample_data_export, "output/tables/sample_metadata.csv")
+
+# Export alpha diversity
+write.csv(alpha_div_merged, "output/tables/alpha_diversity.csv", row.names = FALSE)
+
+cat("Results exported to output/tables/\n")
+```
+
+# Session Information
+
+```{r session-info}
+sessionInfo()
+```
+
+# Summary
+
+This extended analysis included:
+
+1. ✓ Sample and taxonomy summaries
+2. ✓ Advanced alpha diversity analysis
+3. ✓ Beta diversity with statistical tests (PERMANOVA)
+4. ✓ Relative abundance visualizations
+5. ✓ Heatmap of top taxa
+6. ✓ Network analysis (for small datasets)
+7. ✓ **Richness regression analysis** - modeling richness while accounting for sequencing depth
+8. ✓ **DESeq2 differential abundance analysis** - quantitative identification of differentially abundant taxa
+9. ✓ Export of results to CSV files
+
+**New Analyses:**
+
+- **Richness Regression**: Models observed richness as a function of sequencing depth, extracting residuals that represent depth-corrected richness. This allows comparison of richness between samples independent of sequencing effort.
+
+- **DESeq2 Analysis**: Performs robust differential abundance testing that accounts for library size differences and biological variability. Outputs include volcano plots, MA plots, and tables of significant taxa with taxonomy annotations.
+
+You can further customize these analyses based on your specific research questions.
