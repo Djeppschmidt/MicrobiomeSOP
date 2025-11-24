@@ -56,6 +56,27 @@ Alternatively, if you have the `renv.lock` file, you can restore the exact envir
 renv::restore()
 ```
 
+## Test Dataset
+
+To test your setup before analyzing your own data, you can use the **MiSeq SOP dataset** - a widely-used test dataset for microbiome analysis:
+
+**Dataset**: [DADA2 MiSeq SOP Dataset](https://mothur.org/wiki/miseq_sop/)
+
+This dataset contains:
+- 16S rRNA V4 amplicon sequences from mouse gut microbiome
+- Paired-end Illumina MiSeq reads (~20 samples)
+- All necessary FASTQ files for testing the complete pipeline
+
+**Download instructions**:
+```bash
+# Download the dataset
+wget https://mothur.s3.us-east-2.amazonaws.com/wiki/miseqsopdata.zip
+unzip miseqsopdata.zip
+mv MiSeq_SOP/*fastq.gz data/raw/
+```
+
+This test dataset is ideal for validating your installation and understanding the pipeline workflow before processing your own samples.
+
 ## Usage
 
 ### 1. Prepare Your Data
