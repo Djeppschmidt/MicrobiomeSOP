@@ -648,12 +648,159 @@ if (exists("Q.ps")) {
 
 # compare DESeq2 to Quantitative differential abundance
 
-```{r}
-
-# build data table combining effect size and p-values from DESeq2 and Quantitative differential abundance analysis
-
-# plot effect ratio as a colored butterfly plot. blue is positive effect, red is negative effect, grey is non-significant. Vertical orientation, left side is DESeq2; right side is Quantitative dataset
-
+```{r compare-deseq2-quantitative}
+# Check if both result tables exist
+if (file.exists("output/tables/deseq2_results.csv") && 
+    file.exists("output/tables/quantitative_anova_results.csv")) {
+  
+  # Load results
+  deseq2_results <- read.csv("output/tables/deseq2_results.csv", stringsAsFactors = FALSE)
+  quant_results <- read.csv("output/tables/quantitative_anova_results.csv", stringsAsFactors = FALSE)
+  
+  # Merge by taxon/ASV
+  combined_results <- merge(
+    deseq2_results[, c("ASV", "log2FoldChange", "padj", "baseMean")],
+    quant_results[, c("Taxon", "log2_fold_change", "adjusted_p_value")],
+    by.x = "ASV", by.y = "Taxon", all = FALSE
+  )
+  
+  # Rename columns for clarity
+  names(combined_results) <- c("ASV", "DESeq2_log2FC", "DESeq2_padj", 
+                                "baseMean", "Quant_log2FC", "Quant_padj")
+  
+  # Add taxonomy for labels
+  tax_table_data <- as.data.frame(tax_table(ps))
+  combined_results <- merge(combined_results, tax_table_data, 
+                           by.x = "ASV", by.y = "row.names", all.x = TRUE)
+  
+  # Create taxonomic label (use lowest available rank)
+  combined_results$TaxLabel <- apply(combined_results[, c("Genus", "Family", "Order", "Class", "Phylum")], 
+                                     1, function(x) {
+    for (i in 1:length(x)) {
+      if (!is.na(x[i]) && x[i] != "") return(x[i])
+    }
+    return("Unknown")
+  })
+  
+  # Calculate total abundance for each taxon
+  otu_mat <- as.matrix(otu_table(ps))
+  combined_results$TotalAbundance <- rowSums(otu_mat)[combined_results$ASV]
+  
+  # Sort by total abundance
+  combined_results <- combined_results[order(combined_results$TotalAbundance, 
+                                             decreasing = TRUE, na.last = TRUE), ]
+  
+  # Save combined results
+  write.csv(combined_results, "output/tables/combined_deseq2_quantitative_results.csv", 
+            row.names = FALSE)
+  cat("Combined results saved to output/tables/combined_deseq2_quantitative_results.csv\n")
+  
+  # Function to create butterfly plot
+  create_butterfly_plot <- function(data, title) {
+    # Determine significance and effect direction for both methods
+    data$DESeq2_effect <- ifelse(is.na(data$DESeq2_padj) | data$DESeq2_padj >= 0.05, "no_effect",
+                                 ifelse(data$DESeq2_log2FC > 0, "positive", "negative"))
+    data$Quant_effect <- ifelse(is.na(data$Quant_padj) | data$Quant_padj >= 0.05, "no_effect",
+                                ifelse(data$Quant_log2FC > 0, "positive", "negative"))
+    
+    # Prepare data for DESeq2 (left side, negative values)
+    deseq2_data <- data.frame(
+      TaxLabel = data$TaxLabel,
+      Value = -abs(data$DESeq2_log2FC),  # Negative for left side
+      Effect = data$DESeq2_effect,
+      Method = "DESeq2"
+    )
+    
+    # Prepare data for Quantitative (right side, positive values)
+    quant_data <- data.frame(
+      TaxLabel = data$TaxLabel,
+      Value = abs(data$Quant_log2FC),  # Positive for right side
+      Effect = data$Quant_effect,
+      Method = "Quantitative"
+    )
+    
+    # Combine both datasets
+    plot_data <- rbind(deseq2_data, quant_data)
+    
+    # Set factor levels for consistent ordering
+    plot_data$TaxLabel <- factor(plot_data$TaxLabel, levels = unique(data$TaxLabel))
+    
+    # Define colors: blue=positive, red=negative, grey=no effect
+    color_mapping <- c("positive" = "blue", "negative" = "red", "no_effect" = "grey")
+    
+    # Create butterfly plot
+    p <- ggplot(plot_data, aes(x = TaxLabel, y = Value, fill = Effect)) +
+      geom_bar(stat = "identity", width = 0.7) +
+      scale_fill_manual(values = color_mapping,
+                       labels = c("positive" = "Positive effect", 
+                                 "negative" = "Negative effect",
+                                 "no_effect" = "No effect")) +
+      coord_flip() +
+      theme_bw() +
+      labs(title = title,
+           x = "Taxon",
+           y = "Log2 Fold Change",
+           fill = "Effect Direction") +
+      theme(legend.position = "bottom",
+            axis.text.y = element_text(size = 8)) +
+      geom_hline(yintercept = 0, linetype = "solid", color = "black", linewidth = 0.5) +
+      annotate("text", x = Inf, y = -max(abs(plot_data$Value), na.rm = TRUE) * 0.8, 
+               label = "DESeq2", hjust = 0, vjust = 1, size = 4, fontface = "bold") +
+      annotate("text", x = Inf, y = max(abs(plot_data$Value), na.rm = TRUE) * 0.8, 
+               label = "Quantitative", hjust = 1, vjust = 1, size = 4, fontface = "bold")
+    
+    return(p)
+  }
+  
+  # Create butterfly plot for 20 most abundant taxa
+  if (nrow(combined_results) >= 20) {
+    top_20_abundant <- combined_results[1:20, ]
+    p_top20 <- create_butterfly_plot(top_20_abundant, 
+                                     "Comparison of DESeq2 vs Quantitative Analysis\n20 Most Abundant Taxa")
+    print(p_top20)
+    
+    # Save plot
+    ggsave("output/figures/butterfly_plot_top20_abundant.png", p_top20, 
+           width = 10, height = 8, dpi = 300)
+  } else {
+    cat("Not enough taxa for top 20 most abundant plot\n")
+  }
+  
+  # Create butterfly plot for 20 least abundant taxa
+  if (nrow(combined_results) >= 20) {
+    bottom_20_abundant <- combined_results[(nrow(combined_results)-19):nrow(combined_results), ]
+    p_bottom20 <- create_butterfly_plot(bottom_20_abundant, 
+                                       "Comparison of DESeq2 vs Quantitative Analysis\n20 Least Abundant Taxa")
+    print(p_bottom20)
+    
+    # Save plot
+    ggsave("output/figures/butterfly_plot_bottom20_abundant.png", p_bottom20, 
+           width = 10, height = 8, dpi = 300)
+  } else {
+    cat("Not enough taxa for bottom 20 least abundant plot\n")
+  }
+  
+  # Summary statistics
+  cat("\nSummary of Combined Analysis:\n")
+  cat(sprintf("Total taxa compared: %d\n", nrow(combined_results)))
+  cat(sprintf("Taxa significant in DESeq2: %d\n", 
+              sum(!is.na(combined_results$DESeq2_padj) & combined_results$DESeq2_padj < 0.05)))
+  cat(sprintf("Taxa significant in Quantitative: %d\n", 
+              sum(!is.na(combined_results$Quant_padj) & combined_results$Quant_padj < 0.05)))
+  cat(sprintf("Taxa significant in both: %d\n", 
+              sum(!is.na(combined_results$DESeq2_padj) & combined_results$DESeq2_padj < 0.05 &
+                  !is.na(combined_results$Quant_padj) & combined_results$Quant_padj < 0.05)))
+  
+} else {
+  cat("Missing required result files:\n")
+  if (!file.exists("output/tables/deseq2_results.csv")) {
+    cat("- output/tables/deseq2_results.csv not found\n")
+  }
+  if (!file.exists("output/tables/quantitative_anova_results.csv")) {
+    cat("- output/tables/quantitative_anova_results.csv not found\n")
+  }
+  cat("Please run the DESeq2 and Quantitative differential abundance analyses first.\n")
+}
 ```
 
 # Export Results
