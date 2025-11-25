@@ -45,8 +45,8 @@ taxonomy:
 metadata:
   file: "data/metadata/sample_metadata.csv"
   sample_id_column: "SampleID"
-  total_abundance_column: "TotalAbundance"
-  treatment_column: "Group"
+  total_abundance_column: "Abundance"
+  treatment_column: "time"
 
 # Output options
 output:

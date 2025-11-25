@@ -5,6 +5,8 @@ This guide will help you get started with the MicrobiomeSOP pipeline.
 ## Prerequisites
 
 - R (version 4.0.0 or higher)
+- RStudio
+- GitHub Desktop installed
 - At least 8GB RAM (16GB recommended for large datasets)
 - Internet connection for downloading databases
 
@@ -12,25 +14,33 @@ This guide will help you get started with the MicrobiomeSOP pipeline.
 
 ### 1. Clone the Repository
 
+You can do this in terminal by navigating to your github directory and then running the following:
+
 ```bash
 git clone https://github.com/Djeppschmidt/MicrobiomeSOP.git
 cd MicrobiomeSOP
 ```
+Alternatively, you can:
+1) navigate to https://github.com/Djeppschmidt/MicrobiomeSOP
+2) open the dropdown in the green button that says "Code"
+2) select "Open With GitHub Desktop"
+
+This will clone the repository into your GitHub directory
 
 ### 2. Set Up R Environment
 
 Run the setup script to install all required packages:
-
-```bash
-Rscript scripts/setup_renv.R
-```
+1. Navigate to the scripts folder in your local copy of the MicrobiomeSOP repository
+2. Open the setup_renv.R file in RStudio
+3. Highlight the entire file
+4. Press Command + Enter
 
 This will:
 - Install the renv package manager
 - Install all required R packages (dada2, phyloseq, ggplot2, etc.)
 - Create a reproducible environment snapshot
 
-**Expected time**: 10-30 minutes depending on your system
+**Expected time**: less than 30 minutes for most new setups
 
 ### 3. Prepare Your Data
 

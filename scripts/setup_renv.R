@@ -1,31 +1,20 @@
-#!/usr/bin/env Rscript
-
 # Script to initialize renv and install required packages
 
-cat("Initializing renv...\n")
+print("Initializing renv...\n")
 
 # Install renv if not already installed
 if (!requireNamespace("renv", quietly = TRUE)) {
-  install.packages("renv", repos = "https://cloud.r-project.org")
+  install.packages("renv")
 }
 
-library(renv)
-
-# Initialize renv project
-renv::init(bare = TRUE, restart = FALSE)
-
-cat("\nInstalling required packages...\n")
-
-# Install Bioconductor packages
-if (!requireNamespace("BiocManager", quietly = TRUE)) {
-  install.packages("BiocManager", repos = "https://cloud.r-project.org")
-}
 
 # Install required packages
 packages <- c(
   "dada2",      # Bioconductor
   "phyloseq",   # Bioconductor
   "DESeq2",     # Bioconductor
+  "BiocManager",# CRAN
+  "renv",       # CRAN
   "ggplot2",    # CRAN
   "yaml",       # CRAN
   "dplyr",      # CRAN
@@ -41,22 +30,32 @@ bioc_packages <- c("dada2", "phyloseq", "DESeq2")
 cran_packages <- setdiff(packages, bioc_packages)
 github_packages <- c("djeppschmidt/QSeq")
 
+
+
+
+
+# Install GitHub packages
+# library(devtools)
+# install_github(github_packages)
+
+library(renv)
+
+# Initialize renv project
+renv::init(bare = TRUE, restart = FALSE)
+
 # Install CRAN packages
-if (length(cran_packages) > 0) {
-  install.packages(cran_packages, repos = "https://cloud.r-project.org")
+if (length(setdiff(cran_packages, rownames(installed.packages()))) > 0) {
+  renv::install(setdiff(cran_packages, rownames(installed.packages())))
 }
 
 # Install Bioconductor packages
+# renv::init(bioconductor = TRUE, restart = FALSE)
 if (length(bioc_packages) > 0) {
-  BiocManager::install(bioc_packages, update = FALSE, ask = FALSE)
+ renv::install(sapply(bioc_packages, function(x) paste0("bioc::", x)), update = FALSE, ask = FALSE)
 }
-
-# Install GitHub packages
-install_github(github_packages)
-
 # Take snapshot
-cat("\nCreating renv snapshot...\n")
+print("\nCreating renv snapshot...\n")
 renv::snapshot(prompt = FALSE)
 
-cat("\nrenv initialization complete!\n")
-cat("Package library is now managed by renv.\n")
+print("\nrenv initialization complete!\n")
+print("Package library is now managed by renv.\n")

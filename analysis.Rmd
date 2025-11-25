@@ -12,6 +12,9 @@ output:
     highlight: tango
     number_sections: true
     df_print: paged
+  pdf_document:
+    toc: true
+    toc_depth: '3'
 ---
 
 ```{r setup, include=FALSE}
@@ -47,7 +50,7 @@ set.seed(123)
 config <- yaml::read_yaml("config.yaml")
 analysis_type <- config$analysis_type
 
-cat("Analysis type:", analysis_type, "\n")
+paste("Analysis type:", analysis_type, "\n")
 ```
 
 # Setup and Data Paths
@@ -70,8 +73,8 @@ fnRs <- sort(list.files(path, pattern = "_R2_001.fastq", full.names = TRUE))
 # Extract sample names
 sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
 
-cat("Found", length(fnFs), "forward reads and", length(fnRs), "reverse reads\n")
-cat("Sample names:", paste(sample.names, collapse = ", "), "\n")
+print(paste0("Found", length(fnFs), "forward reads and", length(fnRs), "reverse reads\n"))
+print(paste0("Sample names:", paste(sample.names, collapse = ", "), "\n"))
 ```
 
 # Quality Control
