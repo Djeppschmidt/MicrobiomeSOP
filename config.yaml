@@ -33,13 +33,13 @@ taxonomy:
   # Bacterial databases (for bacteria analysis)
   bacteria:
     database: "silva"    # Options: "silva", "greengenes", "rdp"
-    silva_train_set: "silva_nr99_v138.1_train_set.fa.gz"
-    silva_species: "silva_species_assignment_v138.1.fa.gz"
+    silva_train_set: "~Downloads/silva_nr99_v138.1_train_set.fa.gz"
+    silva_species: "~Downloads/silva_species_assignment_v138.1.fa.gz"
 
   # Fungal databases (for fungi analysis)
   fungi:
     database: "unite"    # Options: "unite"
-    unite_train_set: "sh_general_release_dynamic_s_all_10.05.2021.fasta"
+    unite_train_set: "~Downloads/sh_general_release_dynamic_s_all_10.05.2021.fasta"
 
 # Sample metadata
 metadata:
