@@ -15,6 +15,8 @@ output:
   pdf_document:
     toc: true
     toc_depth: '3'
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -71,7 +73,7 @@ fnFs <- sort(list.files(path, pattern = "_R1_001.fastq", full.names = TRUE))
 fnRs <- sort(list.files(path, pattern = "_R2_001.fastq", full.names = TRUE))
 
 # Extract sample names
-sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1)
+sample.names <- sapply(strsplit(basename(fnFs), "_"), `[`, 1) # this is the hardest custom line for a new programmer (or at least it was for me when I was learning)
 
 print(paste0("Found", length(fnFs), "forward reads and", length(fnRs), "reverse reads\n"))
 print(paste0("Sample names:", paste(sample.names, collapse = ", "), "\n"))

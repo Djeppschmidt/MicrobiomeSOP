@@ -15,7 +15,7 @@ download_silva() {
     # Training set
     if [ ! -f "silva_nr99_v138.1_train_set.fa.gz" ]; then
         echo "Downloading SILVA training set..."
-        wget -q --show-progress https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz
+        wget -P data/ -q --show-progress https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz
         echo "✓ SILVA training set downloaded"
     else
         echo "✓ SILVA training set already exists"
@@ -24,7 +24,7 @@ download_silva() {
     # Species assignment
     if [ ! -f "silva_species_assignment_v138.1.fa.gz" ]; then
         echo "Downloading SILVA species assignment..."
-        wget -q --show-progress https://zenodo.org/record/4587955/files/silva_species_assignment_v138.1.fa.gz
+        wget -P data/ -q --show-progress https://zenodo.org/record/4587955/files/silva_species_assignment_v138.1.fa.gz
         echo "✓ SILVA species assignment downloaded"
     else
         echo "✓ SILVA species assignment already exists"
