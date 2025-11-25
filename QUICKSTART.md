@@ -83,6 +83,12 @@ Sample4,Treated,DrugA,T1
 
 #### For Bacterial Analysis (16S rRNA)
 
+Download the SILVA datasets here at:
+
+You are looking for the following files:
+
+Leave them in your download folder (if you move them then you need to edit the file path in the YAML file)
+
 Run the download script:
 
 ```bash
