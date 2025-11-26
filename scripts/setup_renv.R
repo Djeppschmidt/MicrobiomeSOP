@@ -31,9 +31,6 @@ cran_packages <- setdiff(packages, bioc_packages)
 github_packages <- c("djeppschmidt/QSeq")
 
 
-
-
-
 # Install GitHub packages
 # library(devtools)
 # install_github(github_packages)
@@ -53,6 +50,9 @@ if (length(setdiff(cran_packages, rownames(installed.packages()))) > 0) {
 if (length(bioc_packages) > 0) {
  renv::install(sapply(bioc_packages, function(x) paste0("bioc::", x)), update = FALSE, ask = FALSE)
 }
+
+renv::install("djeppschmidt/QSeq")
+
 # Take snapshot
 print("\nCreating renv snapshot...\n")
 renv::snapshot(prompt = FALSE)

@@ -343,14 +343,11 @@ if (length(fnFs) > 0) {
   # Read sample metadata if it exists
   metadata_file <- config$metadata$file
   if (file.exists(metadata_file)) {
-    samdf <- read.csv(metadata_file, row.names = 1)
+    samdf <- read.csv(metadata_file)
+    rownames(samdf)<-samdf$SampleID
     cat("Loaded metadata for", nrow(samdf), "samples\n")
   } else {
-    cat("Warning: Metadata file not found. Creating minimal metadata.\n")
-    samdf <- data.frame(
-      SampleID = sample.names,
-      row.names = sample.names
-    )
+    print("Error: Metadata file not found. Add a file, or check YAML and directory for accuracy. Make sure the format is correct, and column labels are exact matches, including capitalization. The default file name is sample_metadata.csv \n")
   }
   
   # Create phyloseq object

@@ -7,6 +7,8 @@ output:
     toc: true
     toc_float: true
     code_folding: show
+editor_options: 
+  chunk_output_type: inline
 ---
 
 ```{r setup, include=FALSE}
@@ -103,12 +105,11 @@ alpha_div <- estimate_richness(ps, measures = c("Shannon", "Simpson", "Chao1"))
 alpha_div$SampleID <- rownames(alpha_div)
 
 # Merge with sample data
-sample_data_df <- as.data.frame(sample_data(ps))
-sample_data_df$SampleID <- rownames(sample_data_df)
+sample_data_df <- as.data.frame(as.matrix(sample_data(ps)))
 alpha_div_merged <- merge(alpha_div, sample_data_df, by = "SampleID")
 
 # Plot by group if available
-if ("Group" %in% colnames(alpha_div_merged)) {  # !! set group variable in config object
+if (any(config$metadata$treatment_column %in% colnames(alpha_div_merged))) {  # !! set group variable in config object
   library(tidyr)
   alpha_long <- pivot_longer(
     alpha_div_merged,
@@ -117,7 +118,7 @@ if ("Group" %in% colnames(alpha_div_merged)) {  # !! set group variable in confi
     values_to = "Value"
   )
 
-  ggplot(alpha_long, aes(x = Group, y = Value, fill = Group)) +
+  ggplot(alpha_long, aes(x = !!rlang::sym(config$metadata$treatment_column), y = Value, fill = !!rlang::sym(config$metadata$treatment_column))) +
     geom_boxplot() +
     facet_wrap(~Metric, scales = "free_y") +
     theme_bw() +
@@ -128,6 +129,7 @@ if ("Group" %in% colnames(alpha_div_merged)) {  # !! set group variable in confi
 }
 ```
 
+
 ## Beta Diversity Analysis
 
 ```{r beta-diversity, fig.width=10, fig.height=8}
@@ -135,11 +137,12 @@ if ("Group" %in% colnames(alpha_div_merged)) {  # !! set group variable in confi
 dist_matrix <- phyloseq::distance(ps, method = "bray")
 
 # Perform PERMANOVA if groups exist
-if (config$metadata$treatment_column %in% colnames(sample_data_df)) {. #!! test that this actually works to pass the column
-  Group <- config$metadata$treatment_column
-
+if (config$metadata$treatment_column %in% colnames(sample_data_df)) {
+  
+sample_data_df[[config$metadata$treatment_column]] <- as.factor(sample_data_df[[config$metadata$treatment_column]])
+  
   # PERMANOVA test
-  permanova_result <- adonis2(dist_matrix ~ Group,
+  permanova_result <- adonis2(as.formula(paste0("dist_matrix ~ ", config$metadata$treatment_column, sep = "")),
                               data = sample_data_df,
                               permutations = 999)
 
@@ -147,7 +150,7 @@ if (config$metadata$treatment_column %in% colnames(sample_data_df)) {. #!! test 
   print(permanova_result)
 
   # Test for homogeneity of dispersion
-  beta_disp <- betadisper(dist_matrix, sample_data_df$Group)
+  beta_disp <- betadisper(dist_matrix, sample_data_df[[config$metadata$treatment_column]])
   cat("\nBeta Dispersion Test:\n")
   print(permutest(beta_disp, permutations = 999))
 }
@@ -160,8 +163,8 @@ p <- plot_ordination(ps, pcoa, type = "samples", color = "Group") +
   theme_bw() +
   labs(title = "PCoA Ordination - Bray-Curtis Distance")
 
-if ("Group" %in% colnames(sample_data_df)) {
-  p <- p + stat_ellipse(aes(color = Group), type = "t", level = 0.95)
+if (config$metadata$treatment_column %in% colnames(sample_data_df)) {
+  p <- p + stat_ellipse(aes(color = sample_data_df[[config$metadata$treatment_column]]), type = "t", level = 0.95)
 }
 
 print(p)
@@ -217,8 +220,10 @@ plot_heatmap(ps_top30_rel,
 
 ```{r network, fig.width=10, fig.height=10}
 # Create network plot
+
+
 # Note: This is computationally intensive for large datasets
-if (ntaxa(ps) < 100) {
+if (ntaxa(ps_top30) < 100) {
   net <- make_network(ps, type = "taxa", distance = "bray", max.dist = 0.3)
   plot_network(net, ps,
                type = "taxa",
@@ -332,13 +337,20 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
   library(DESeq2)
 
   # Check if Group variable exists
-  if ("Group" %in% colnames(sample_data_df)) {
+  if (config$metadata$treatment_column %in% colnames(sample_data_df)) {
     cat("Performing DESeq2 differential abundance analysis...\n")
     cat("===================================================\n\n")
-
+    
+    sample_data_df[[config$metadata$treatment_column]] <- as.factor(sample_data_df[[config$metadata$treatment_column]])
+    
     # Convert phyloseq to DESeq2 format
     # DESeq2 requires integer counts
-    diagdds <- phyloseq_to_deseq2(ps, ~ Group)
+    diagdds <- phyloseq_to_deseq2(ps, 
+                                  as.formula(paste0("~ ",
+                                                 config$metadata$treatment_column,
+                                                    sep = "")
+                                             )
+                                  )
 
     # Calculate geometric means for normalization
     # Geometric mean calculation that handles zero values by excluding them,
@@ -360,7 +372,7 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
 
     # Extract results
     # Get contrasts (comparing first two groups)
-    groups <- unique(sample_data_df$Group)
+    groups <- unique(sample_data_df[[config$metadata$treatment_column]])
     if (length(groups) >= 2) {
       contrast_name <- paste(groups[1], "vs", groups[2])
       cat("Contrast:", contrast_name, "\n\n")

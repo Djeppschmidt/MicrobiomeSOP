@@ -84,28 +84,21 @@ Sample4,Treated,DrugA,T1
 #### For Bacterial Analysis (16S rRNA)
 
 Download the SILVA datasets here at:
+https://benjjneb.github.io/dada2/training.html
 
 You are looking for the following files:
+silva_nr99_v138.1_train_set.fa.gz and silva_species_assignment_v138.1.fa.gz
 
-Leave them in your download folder (if you move them then you need to edit the file path in the YAML file)
+These files should be in the first link (Silva version 138.2)
 
-Run the download script:
+Leave them in your download folder, otherwise update the path to these files in the YAML.
 
-```bash
-bash scripts/download_databases.sh
-```
-
-Select option 1 for SILVA databases.
-
-**Or manually download**:
-```bash
-wget https://zenodo.org/record/4587955/files/silva_nr99_v138.1_train_set.fa.gz
-wget https://zenodo.org/record/4587955/files/silva_species_assignment_v138.1.fa.gz
-```
 
 #### For Fungal Analysis (ITS)
 
 Visit [UNITE database](https://doi.plutof.ut.ee/doi/10.15156/BIO/2483915) and download the general release FASTA file.
+
+Leave these files in the download file, otherwise update the path to the files in the YAML file.
 
 ### 5. Configure Analysis Parameters
 
