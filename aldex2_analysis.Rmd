@@ -167,7 +167,8 @@ This section allows you to configure all analysis parameters in one place.
 
 # Treatment/condition column in metadata
 # This should match a column name in your sample_data
-treatment_column <- "time"
+# Example: "time", "treatment", "group", "condition"
+treatment_column <- "time"  # <-- CHANGE THIS to match your metadata column
 
 # Reference taxa for log-ratio transformation
 # Set to NULL to use standard CLR (geometric mean of all taxa)
@@ -251,7 +252,7 @@ if (exists("ps")) {
   )
   
   # Filter for taxa with minimum mean abundance (to avoid low-abundance artifacts)
-  min_abundance <- 0.001  # 0.1% mean relative abundance
+  min_abundance <- 0.001  # Threshold of 0.001 = 0.1% mean relative abundance
   stable_taxa <- taxon_cv_df %>%
     filter(MeanAbundance >= min_abundance) %>%
     arrange(CV)
@@ -731,18 +732,22 @@ if (exists("aldex_results")) {
   # Export summary statistics
   summary_stats <- data.frame(
     Metric = c("Total taxa analyzed",
-               "Significant (Welch BH < 0.05)",
-               "Significant (Wilcoxon BH < 0.05)",
-               "Large effect (|effect| > 1)",
+               paste0("Significant (Welch BH < ", p_value_threshold, ")"),
+               paste0("Significant (Wilcoxon BH < ", p_value_threshold, ")"),
+               paste0("Large effect (|effect| > ", effect_size_threshold, ")"),
                "Significant AND large effect",
+               "P-value threshold used",
+               "Effect size threshold used",
                "Reference method",
                "Monte Carlo samples"),
     Value = c(nrow(aldex_results),
-              sum(aldex_results$we.eBH < 0.05, na.rm = TRUE),
-              sum(aldex_results$wi.eBH < 0.05, na.rm = TRUE),
-              sum(abs(aldex_results$effect) > 1, na.rm = TRUE),
-              sum(aldex_results$we.eBH < 0.05 & abs(aldex_results$effect) > 1, 
-                  na.rm = TRUE),
+              sum(aldex_results$we.eBH < p_value_threshold, na.rm = TRUE),
+              sum(aldex_results$wi.eBH < p_value_threshold, na.rm = TRUE),
+              sum(abs(aldex_results$effect) > effect_size_threshold, na.rm = TRUE),
+              sum(aldex_results$we.eBH < p_value_threshold & 
+                  abs(aldex_results$effect) > effect_size_threshold, na.rm = TRUE),
+              p_value_threshold,
+              effect_size_threshold,
               ifelse(is.null(reference_taxa), "Standard CLR (all)", "Custom reference"),
               mc_samples)
   )
