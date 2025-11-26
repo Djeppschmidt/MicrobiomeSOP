@@ -64,6 +64,8 @@ Place your paired-end FASTQ files in the `data/raw/` directory with the naming c
 - Forward reads: `SampleName_R1_001.fastq` or `SampleName_R1_001.fastq.gz`
 - Reverse reads: `SampleName_R2_001.fastq` or `SampleName_R2_001.fastq.gz`
 
+There is test data provided under Data/test/. The YAML file is configured for this data. If you use your own data you will need to update the YAML with your parameters.
+
 ### 2. Create Sample Metadata
 
 Edit `data/metadata/sample_metadata.csv` with your experimental metadata. The file should include:
@@ -108,7 +110,7 @@ wget https://doi.plutof.ut.ee/doi/10.15156/BIO/2483915 -O sh_general_release_dyn
 gzip sh_general_release_dynamic_s_all_10.05.2021.fasta
 ```
 
-Place database files in the project root directory or update paths in `config.yaml`.
+Place database files in your Download directory or update paths in `config.yaml`.
 
 ### 5. Run the Analysis
 
