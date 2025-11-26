@@ -377,7 +377,7 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
       contrast_name <- paste(groups[1], "vs", groups[2])
       cat("Contrast:", contrast_name, "\n\n")
 
-      res <- results(diagdds, contrast = c("Group", groups[1], groups[2]))
+      res <- results(diagdds, contrast = c(config$metadata$treatment_column, as.character(groups[1]), as.character(groups[2])))
 
       # Order by adjusted p-value
       res_ordered <- res[order(res$padj, na.last = NA), ]
@@ -487,7 +487,7 @@ if (!requireNamespace("DESeq2", quietly = TRUE)) {
           )
 
           # Add group information
-          sample_groups <- setNames(sample_data_df$Group, rownames(sample_data_df))
+          sample_groups <- setNames(sample_data_df[[config$metadata$treatment_column]], rownames(sample_data_df))
           top_counts_long$Group <- sample_groups[top_counts_long$Sample]
 
           p_bar <- ggplot(top_counts_long,
@@ -549,8 +549,9 @@ if (exists("Q.ps")) {
 
   # Extract OTU table and sample data
   otu_mat <- as.matrix(otu_table(Q.ps))
-  sample_df <- as.data.frame(sample_data(Q.ps))
-
+  sample_df <- as.data.frame(as.matrix(sample_data(Q.ps)))
+  sample_df[[treatment_col]] <- as.factor(sample_df[[treatment_col]])
+  
   # Check if treatment column exists in metadata
   if (treatment_col %in% colnames(sample_df)) {
     # Get treatment groups
@@ -568,8 +569,8 @@ if (exists("Q.ps")) {
 
         # Create data frame for ANOVA
         anova_df <- data.frame(
-          abundance = taxon_abundance,
-          treatment = treatment
+          "abundance" = as.vector(taxon_abundance),
+          "treatment" = treatment
         )
 
         # Run ANOVA
@@ -580,7 +581,7 @@ if (exists("Q.ps")) {
         p_value <- anova_summary[[1]]$`Pr(>F)`[1]
 
         # Calculate group means for effect direction
-        group_means <- tapply(taxon_abundance, treatment, mean)
+        group_means <- tapply(as.vector(taxon_abundance), treatment, mean)
 
         # Effect direction: which group has highest mean
         max_group <- names(which.max(group_means))
@@ -602,17 +603,17 @@ if (exists("Q.ps")) {
 
         # Store results
         anova_results[[i]] <- data.frame(
-          Taxon = taxon_name,
-          F_statistic = anova_summary[[1]]$`F value`[1],
-          p_value = p_value,
-          adjusted_p_value = NA,  # Will be calculated later
-          log2_fold_change = log2fc,
-          eta_squared = eta_squared,
-          max_group = max_group,
-          min_group = min_group,
-          max_mean = max_mean,
-          min_mean = min_mean,
-          stringsAsFactors = FALSE
+          "Taxon" = taxon_name,
+          "F_statistic" = anova_summary[[1]]$`F value`[1],
+          "p_value" = p_value,
+          "adjusted_p_value" = NA,  # Will be calculated later
+          "log2_fold_change" = log2fc,
+          "eta_squared" = eta_squared,
+          "max_group" = max_group,
+          "min_group" = min_group,
+          "max_mean" = max_mean,
+          "min_mean" = min_mean #,
+          #stringsAsFactors = FALSE
         )
       }
 
@@ -718,7 +719,7 @@ if (file.exists("output/tables/deseq2_results.csv") &&
     # Prepare data for DESeq2 (left side - negate values to plot on left)
     deseq2_data <- data.frame(
       TaxLabel = data$TaxLabel,
-      Value = -data$DESeq2_log2FC,  # Negate to plot on left side
+      Value = -abs(data$DESeq2_log2FC),  # Negate to plot on left side
       Effect = data$DESeq2_effect,
       Method = "DESeq2"
     )
@@ -726,7 +727,7 @@ if (file.exists("output/tables/deseq2_results.csv") &&
     # Prepare data for Quantitative (right side - keep positive)
     quant_data <- data.frame(
       TaxLabel = data$TaxLabel,
-      Value = data$Quant_log2FC,  # Keep positive to plot on right
+      Value = abs(data$Quant_log2FC),  # Keep positive to plot on right
       Effect = data$Quant_effect,
       Method = "Quantitative"
     )
@@ -827,7 +828,7 @@ tax_table_export <- as.data.frame(tax_table(ps))
 write.csv(tax_table_export, "output/tables/taxonomy_table.csv")
 
 # Export sample data
-sample_data_export <- as.data.frame(sample_data(ps))
+sample_data_export <- as.data.frame(as.matrix(sample_data(ps)))
 write.csv(sample_data_export, "output/tables/sample_metadata.csv")
 
 # Export alpha diversity
