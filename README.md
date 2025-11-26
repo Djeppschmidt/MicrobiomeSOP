@@ -22,6 +22,7 @@ The pipeline supports both **bacterial** (16S rRNA) and **fungal** (ITS) amplico
 - ✅ Basic diversity and composition analysis
 - ✅ **Advanced richness modeling** accounting for sequencing depth
 - ✅ **DESeq2 differential abundance analysis** for quantitative comparisons
+- ✅ **ALDEx2 compositional analysis** with custom reference taxa selection (standalone workflow)
 - ✅ Reproducible environment management with renv
 - ✅ Configurable parameters via YAML
 - ✅ Comprehensive tracking of reads through pipeline steps
@@ -143,6 +144,23 @@ The extended analysis includes:
 - Heatmaps and co-occurrence networks
 - Comprehensive data exports
 
+### 7. ALDEx2 Quantitative Analysis (Optional - Standalone)
+
+For compositional data analysis using ALDEx2 with custom reference taxa:
+
+```bash
+Rscript -e "rmarkdown::render('aldex2_analysis.Rmd')"
+```
+
+The ALDEx2 analysis is a **standalone workflow** that does not require a YAML configuration file. It includes:
+- **Custom reference taxa selection**: Multiple methods to designate specific taxa as the log-ratio reference
+  - Selection by taxonomy
+  - Selection by abundance stability (coefficient of variation)
+  - Selection by pre-screening for non-differential taxa
+- **ALDEx2 differential abundance analysis**: Compositional-aware statistical testing
+- Effect size estimation with confidence intervals
+- Multiple visualization types (MA, volcano, effect size plots)
+
 ## Output Files
 
 The pipeline generates:
@@ -161,11 +179,20 @@ The pipeline generates:
 - `output/tables/deseq2_significant.csv` - Significantly differentially abundant taxa only
 - `extended_analysis.html` - Extended analysis report with advanced visualizations
 
+**ALDEx2 Analysis (if run):**
+- `output/tables/aldex2_full_results.csv` - Complete ALDEx2 results with all statistics
+- `output/tables/aldex2_significant_results.csv` - Significantly differentially abundant taxa only
+- `output/tables/aldex2_summary_stats.csv` - Summary statistics of the analysis
+- `output/figures/aldex2_*.png` - ALDEx2 visualization plots (MA, volcano, effect size, etc.)
+- `aldex2_analysis.html` - ALDEx2 analysis report
+
 ## Project Structure
 
 ```
 MicrobiomeSOP/
 ├── analysis.Rmd              # Main analysis workflow
+├── extended_analysis.Rmd     # Extended downstream analysis
+├── aldex2_analysis.Rmd       # Standalone ALDEx2 quantitative analysis
 ├── config.yaml               # Configuration parameters
 ├── renv.lock                 # Package version lock file
 ├── .Rprofile                 # R environment setup
@@ -241,6 +268,7 @@ If you use this pipeline, please cite:
 
 - **DADA2**: Callahan et al. (2016) Nature Methods
 - **phyloseq**: McMurdie and Holmes (2013) PLoS ONE
+- **ALDEx2**: Fernandes et al. (2014) Microbiome (for ALDEx2 analysis)
 - **SILVA**: Quast et al. (2013) Nucleic Acids Research (for bacterial analysis)
 - **UNITE**: Nilsson et al. (2019) Nucleic Acids Research (for fungal analysis)
 
