@@ -1,0 +1,821 @@
+---
+title: "Quantitative Sequencing Analysis with ALDEx2"
+author: "MicrobiomeSOP"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    code_folding: show
+    theme: flatly
+    highlight: tango
+    number_sections: true
+    df_print: paged
+  pdf_document:
+    toc: true
+    toc_depth: '3'
+editor_options: 
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 8,
+  dpi = 300
+)
+```
+
+# Introduction
+
+This document provides a standalone workflow for **quantitative sequencing analysis** using the **ALDEx2** package. ALDEx2 (ANOVA-Like Differential Expression 2) is a compositional data analysis tool specifically designed for high-throughput sequencing data.
+
+## Why ALDEx2?
+
+Microbiome sequencing data is **compositional** - it represents relative abundances that sum to a constant (the total number of reads per sample). Standard statistical methods assume data are independent, which is violated by compositional data. ALDEx2 addresses this by:
+
+1. **Centered Log-Ratio (CLR) Transformation**: Transforms compositional data to a log-ratio scale that is suitable for standard statistical analyses
+2. **Monte Carlo Sampling**: Models the technical variability by sampling from the Dirichlet distribution
+3. **Effect Size Estimation**: Provides effect sizes (difference between and overlap of groups) in addition to p-values
+
+## Custom Reference Taxa
+
+A key feature of this workflow is the ability to **specify custom reference taxa** for the log-ratio transformation. By default, ALDEx2 uses the geometric mean of all taxa (CLR transformation). However, you can select specific taxa that you believe to be stable across conditions to serve as the reference denominator. This is particularly useful when:
+
+- You have prior knowledge of taxa that don't change between conditions
+- You want to anchor your analysis to specific "housekeeping" taxa
+- You're performing spike-in experiments with known reference organisms
+
+# Load Required Libraries
+
+```{r load-libraries}
+# Core packages
+library(phyloseq)
+library(ALDEx2)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+# Set seed for reproducibility
+set.seed(42)
+
+# Create output directories if they don't exist
+output_path <- "output"
+fig_path <- file.path(output_path, "figures")
+table_path <- file.path(output_path, "tables")
+
+dir.create(fig_path, showWarnings = FALSE, recursive = TRUE)
+dir.create(table_path, showWarnings = FALSE, recursive = TRUE)
+
+cat("Libraries loaded successfully\n")
+cat("Output directories created\n")
+```
+
+# Load and Prepare Data
+
+## Option 1: Load Existing Phyloseq Object
+
+If you have already run the main analysis pipeline, you can load the phyloseq object directly.
+
+```{r load-phyloseq}
+# Path to phyloseq object from main analysis
+phyloseq_path <- "output/phyloseq_filtered.rds"
+
+# Check if phyloseq object exists
+if (file.exists(phyloseq_path)) {
+  ps <- readRDS(phyloseq_path)
+  cat("Loaded phyloseq object from:", phyloseq_path, "\n")
+  print(ps)
+} else {
+  cat("Phyloseq object not found at:", phyloseq_path, "\n")
+  cat("Please run the main analysis.Rmd first, or use Option 2 to create data manually.\n")
+}
+```
+
+## Option 2: Create Data Manually (Standalone)
+
+If starting fresh without a phyloseq object, you can create your data structures here.
+
+```{r create-data-manual, eval=FALSE}
+# Example of loading data manually (set eval=TRUE to use)
+
+# Load count table (rows = samples, columns = taxa)
+# count_matrix <- read.csv("path/to/otu_table.csv", row.names = 1)
+
+# Load taxonomy table
+# taxonomy <- read.csv("path/to/taxonomy.csv", row.names = 1)
+
+# Load sample metadata
+# metadata <- read.csv("path/to/sample_metadata.csv", row.names = 1)
+
+# Create phyloseq object
+# ps <- phyloseq(
+#   otu_table(as.matrix(count_matrix), taxa_are_rows = FALSE),
+#   tax_table(as.matrix(taxonomy)),
+#   sample_data(metadata)
+# )
+```
+
+# Data Inspection and Quality Check
+
+```{r inspect-data}
+if (exists("ps")) {
+  # Summary statistics
+  cat("\n=== Data Summary ===\n")
+  cat("Number of samples:", nsamples(ps), "\n")
+  cat("Number of taxa:", ntaxa(ps), "\n")
+  cat("Total reads:", sum(sample_sums(ps)), "\n")
+  cat("Mean reads per sample:", round(mean(sample_sums(ps))), "\n")
+  cat("Median reads per sample:", round(median(sample_sums(ps))), "\n")
+  
+  # Sample metadata columns
+  cat("\nAvailable metadata columns:\n")
+  print(colnames(sample_data(ps)))
+  
+  # Distribution of reads per sample
+  sample_reads <- data.frame(
+    Sample = sample_names(ps),
+    Reads = sample_sums(ps)
+  )
+  
+  p_reads <- ggplot(sample_reads, aes(x = reorder(Sample, Reads), y = Reads)) +
+    geom_bar(stat = "identity", fill = "steelblue") +
+    theme_bw() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = "Sequencing Depth per Sample",
+         x = "Sample",
+         y = "Total Reads") +
+    geom_hline(yintercept = median(sample_reads$Reads), 
+               linetype = "dashed", color = "red")
+  
+  print(p_reads)
+}
+```
+
+# Define Analysis Parameters
+
+This section allows you to configure all analysis parameters in one place.
+
+```{r define-parameters}
+# ============================================
+# USER-DEFINED PARAMETERS - MODIFY AS NEEDED
+# ============================================
+
+# Treatment/condition column in metadata
+# This should match a column name in your sample_data
+treatment_column <- "time"
+
+# Reference taxa for log-ratio transformation
+# Set to NULL to use standard CLR (geometric mean of all taxa)
+# Or provide a vector of taxa names to use as reference
+# Example: reference_taxa <- c("ASV1", "ASV2", "ASV3")
+reference_taxa <- NULL
+
+# ALDEx2 parameters
+mc_samples <- 128        # Number of Monte Carlo samples (128 is default)
+aldex_test <- "t"        # Test type: "t" for t-test, "glm" for GLM
+denom_method <- "all"    # Denominator: "all", "iqlr", "zero", "lvha", or "user"
+
+# Significance thresholds
+effect_size_threshold <- 1    # Minimum effect size to consider biologically meaningful
+p_value_threshold <- 0.05     # P-value threshold for significance
+
+cat("Analysis parameters configured\n")
+cat("Treatment column:", treatment_column, "\n")
+cat("Reference taxa:", ifelse(is.null(reference_taxa), "All (standard CLR)", 
+                               paste(reference_taxa, collapse = ", ")), "\n")
+cat("Monte Carlo samples:", mc_samples, "\n")
+cat("Statistical test:", aldex_test, "\n")
+```
+
+# Custom Reference Taxa Selection
+
+This section provides methods for selecting and validating reference taxa.
+
+## Method 1: Select by Taxonomy
+
+Select taxa based on their taxonomic classification.
+
+```{r select-ref-by-taxonomy}
+if (exists("ps")) {
+  # Function to select taxa by taxonomic criteria
+  select_taxa_by_taxonomy <- function(ps, rank, names_to_include) {
+    tax <- as.data.frame(tax_table(ps))
+    if (rank %in% colnames(tax)) {
+      matching_taxa <- rownames(tax)[tax[[rank]] %in% names_to_include]
+      return(matching_taxa)
+    } else {
+      warning(paste("Rank", rank, "not found in taxonomy table"))
+      return(character(0))
+    }
+  }
+  
+  # Example: Select all Bacteroidetes as reference
+  # Uncomment and modify as needed:
+  # reference_taxa <- select_taxa_by_taxonomy(ps, "Phylum", c("Bacteroidetes"))
+  
+  # View available taxa at different ranks
+  tax_table_df <- as.data.frame(tax_table(ps))
+  
+  cat("\nAvailable Phyla:\n")
+  print(table(tax_table_df$Phylum))
+}
+```
+
+## Method 2: Select by Abundance Stability
+
+Identify taxa with low variance across samples as potential references.
+
+```{r select-ref-by-stability}
+if (exists("ps")) {
+  # Calculate relative abundance
+  ps_rel <- transform_sample_counts(ps, function(x) x / sum(x))
+  otu_rel <- as.data.frame(otu_table(ps_rel))
+  
+  # Calculate coefficient of variation for each taxon
+  if (taxa_are_rows(ps_rel)) {
+    taxon_cv <- apply(otu_rel, 1, function(x) sd(x) / mean(x))
+  } else {
+    taxon_cv <- apply(otu_rel, 2, function(x) sd(x) / mean(x))
+  }
+  
+  # Get taxa with lowest CV (most stable)
+  taxon_cv_df <- data.frame(
+    Taxon = names(taxon_cv),
+    CV = taxon_cv,
+    MeanAbundance = if (taxa_are_rows(ps_rel)) rowMeans(otu_rel) else colMeans(otu_rel)
+  )
+  
+  # Filter for taxa with minimum mean abundance (to avoid low-abundance artifacts)
+  min_abundance <- 0.001  # 0.1% mean relative abundance
+  stable_taxa <- taxon_cv_df %>%
+    filter(MeanAbundance >= min_abundance) %>%
+    arrange(CV)
+  
+  cat("\nTop 10 most stable taxa (lowest CV):\n")
+  print(head(stable_taxa, 10))
+  
+  # Plot CV vs Mean Abundance
+  p_stability <- ggplot(taxon_cv_df, aes(x = MeanAbundance, y = CV)) +
+    geom_point(alpha = 0.5) +
+    scale_x_log10() +
+    geom_hline(yintercept = median(taxon_cv_df$CV, na.rm = TRUE), 
+               linetype = "dashed", color = "red") +
+    geom_vline(xintercept = min_abundance, 
+               linetype = "dashed", color = "blue") +
+    theme_bw() +
+    labs(title = "Taxon Stability (CV) vs Mean Abundance",
+         x = "Mean Relative Abundance (log scale)",
+         y = "Coefficient of Variation",
+         caption = "Red line: median CV; Blue line: minimum abundance threshold")
+  
+  print(p_stability)
+  
+  # Example: Use top 5 most stable taxa as reference
+  # Uncomment to use:
+  # reference_taxa <- head(stable_taxa$Taxon, 5)
+}
+```
+
+## Method 3: Select by Differential Abundance Screening
+
+Pre-screen taxa to identify those that don't differ between groups.
+
+```{r select-ref-by-screening}
+if (exists("ps")) {
+  # Get the OTU table and conditions
+  otu_counts <- as.data.frame(otu_table(ps))
+  
+  # Ensure correct orientation (samples in columns, taxa in rows)
+  if (!taxa_are_rows(ps)) {
+    otu_counts <- t(otu_counts)
+  }
+  
+  # Get condition vector
+  sample_df <- as.data.frame(sample_data(ps))
+  
+  if (treatment_column %in% colnames(sample_df)) {
+    conditions <- as.factor(sample_df[[treatment_column]])
+    
+    # Quick Kruskal-Wallis test for each taxon
+    kw_pvalues <- apply(otu_counts, 1, function(x) {
+      if (sum(x > 0) < 3) return(1)  # Skip very low prevalence taxa
+      kruskal.test(x ~ conditions)$p.value
+    })
+    
+    # Taxa with high p-values (no significant difference) could be good references
+    potential_refs <- data.frame(
+      Taxon = names(kw_pvalues),
+      KW_pvalue = kw_pvalues
+    ) %>%
+      arrange(desc(KW_pvalue))
+    
+    cat("\nTop 10 taxa with highest p-values (least likely to differ between groups):\n")
+    print(head(potential_refs, 10))
+    
+    # Example: Use taxa with p > 0.5 as reference
+    # Uncomment to use:
+    # reference_taxa <- potential_refs$Taxon[potential_refs$KW_pvalue > 0.5]
+  } else {
+    cat("Treatment column '", treatment_column, "' not found in sample data\n")
+  }
+}
+```
+
+## Set Final Reference Taxa
+
+After exploring the options above, set your final reference taxa here.
+
+```{r set-reference-taxa}
+# ============================================
+# SET YOUR REFERENCE TAXA HERE
+# ============================================
+
+# Option 1: Use all taxa (standard CLR - default)
+# reference_taxa <- NULL
+
+# Option 2: Specific taxa by name
+# reference_taxa <- c("ASV1", "ASV2", "ASV3")
+
+# Option 3: Use stable taxa from Method 2
+# reference_taxa <- head(stable_taxa$Taxon, 5)
+
+# Option 4: Use non-differential taxa from Method 3
+# reference_taxa <- potential_refs$Taxon[potential_refs$KW_pvalue > 0.5]
+
+# Display current selection
+if (is.null(reference_taxa)) {
+  cat("Reference: Standard CLR (geometric mean of all taxa)\n")
+  denom_method <- "all"
+} else {
+  cat("Reference taxa selected:", length(reference_taxa), "taxa\n")
+  cat("Taxa:", paste(head(reference_taxa, 10), collapse = ", "), 
+      ifelse(length(reference_taxa) > 10, "...", ""), "\n")
+  denom_method <- "user"
+}
+```
+
+# Prepare Data for ALDEx2
+
+```{r prepare-aldex-data}
+if (exists("ps")) {
+  # Extract count matrix
+  # ALDEx2 expects: rows = features (taxa), columns = samples
+  count_matrix <- as.data.frame(otu_table(ps))
+  
+  if (!taxa_are_rows(ps)) {
+    count_matrix <- t(count_matrix)
+  }
+  
+  # Ensure counts are integers
+  count_matrix <- round(count_matrix)
+  
+  # Get condition vector
+  sample_df <- as.data.frame(sample_data(ps))
+  
+  if (treatment_column %in% colnames(sample_df)) {
+    conditions <- as.character(sample_df[[treatment_column]])
+    names(conditions) <- rownames(sample_df)
+    
+    # Ensure sample order matches
+    conditions <- conditions[colnames(count_matrix)]
+    
+    cat("Data prepared for ALDEx2\n")
+    cat("Count matrix dimensions:", nrow(count_matrix), "taxa x", 
+        ncol(count_matrix), "samples\n")
+    cat("Conditions:", paste(unique(conditions), collapse = " vs "), "\n")
+    cat("Samples per condition:\n")
+    print(table(conditions))
+  } else {
+    stop(paste("Treatment column '", treatment_column, "' not found in sample data"))
+  }
+}
+```
+
+# Run ALDEx2 Analysis
+
+## Generate CLR-transformed Values
+
+```{r aldex-clr}
+if (exists("count_matrix") && exists("conditions")) {
+  # Create ALDEx2 object with CLR transformation
+  if (denom_method == "user" && !is.null(reference_taxa)) {
+    # Find indices of reference taxa
+    ref_indices <- which(rownames(count_matrix) %in% reference_taxa)
+    
+    if (length(ref_indices) == 0) {
+      warning("No reference taxa found in count matrix. Using standard CLR.")
+      aldex_clr <- aldex.clr(count_matrix, conditions, mc.samples = mc_samples, 
+                             denom = "all", verbose = TRUE)
+    } else {
+      cat("Using", length(ref_indices), "taxa as reference\n")
+      aldex_clr <- aldex.clr(count_matrix, conditions, mc.samples = mc_samples, 
+                             denom = ref_indices, verbose = TRUE)
+    }
+  } else {
+    aldex_clr <- aldex.clr(count_matrix, conditions, mc.samples = mc_samples, 
+                           denom = denom_method, verbose = TRUE)
+  }
+  
+  cat("\nALDEx2 CLR transformation complete\n")
+  cat("Monte Carlo samples:", mc_samples, "\n")
+}
+```
+
+## Perform Statistical Testing
+
+```{r aldex-test}
+if (exists("aldex_clr")) {
+  # Run t-test (for 2-group comparison)
+  aldex_tt <- aldex.ttest(aldex_clr, paired.test = FALSE, verbose = TRUE)
+  
+  # Calculate effect sizes
+  aldex_effect <- aldex.effect(aldex_clr, CI = TRUE, verbose = TRUE)
+  
+  # Combine results
+  aldex_results <- data.frame(aldex_tt, aldex_effect)
+  aldex_results$Taxon <- rownames(aldex_results)
+  
+  cat("\nALDEx2 analysis complete\n")
+  cat("Results for", nrow(aldex_results), "taxa\n")
+}
+```
+
+## Add Taxonomy Information
+
+```{r add-taxonomy}
+if (exists("aldex_results") && exists("ps")) {
+  # Get taxonomy table
+  tax_df <- as.data.frame(tax_table(ps))
+  tax_df$Taxon <- rownames(tax_df)
+  
+  # Merge with results
+  aldex_results <- merge(aldex_results, tax_df, by = "Taxon", all.x = TRUE)
+  
+  # Create readable taxonomy label
+  aldex_results$TaxLabel <- apply(aldex_results[, c("Genus", "Family", "Order", 
+                                                     "Class", "Phylum")], 1, 
+    function(x) {
+      for (i in 1:length(x)) {
+        if (!is.na(x[i]) && x[i] != "" && x[i] != "unclassified") {
+          return(paste(names(x)[i], x[i], sep = ": "))
+        }
+      }
+      return("Unknown")
+    }
+  )
+  
+  cat("Taxonomy information added to results\n")
+}
+```
+
+# Results Summary
+
+```{r results-summary}
+if (exists("aldex_results")) {
+  # Summary statistics
+  cat("=== ALDEx2 Results Summary ===\n\n")
+  
+  # Significant taxa (different criteria)
+  sig_welch <- sum(aldex_results$we.eBH < p_value_threshold, na.rm = TRUE)
+  sig_wilcox <- sum(aldex_results$wi.eBH < p_value_threshold, na.rm = TRUE)
+  sig_effect <- sum(abs(aldex_results$effect) > effect_size_threshold, na.rm = TRUE)
+  sig_both <- sum(aldex_results$we.eBH < p_value_threshold & 
+                  abs(aldex_results$effect) > effect_size_threshold, na.rm = TRUE)
+  
+  cat("Significant taxa (Welch's t-test, BH-adjusted p <", p_value_threshold, "):", 
+      sig_welch, "\n")
+  cat("Significant taxa (Wilcoxon test, BH-adjusted p <", p_value_threshold, "):", 
+      sig_wilcox, "\n")
+  cat("Taxa with large effect size (|effect| >", effect_size_threshold, "):", 
+      sig_effect, "\n")
+  cat("Taxa significant AND large effect:", sig_both, "\n")
+  
+  # Top results table
+  cat("\n\nTop 15 taxa by effect size:\n")
+  top_results <- aldex_results %>%
+    arrange(desc(abs(effect))) %>%
+    select(Taxon, TaxLabel, effect, overlap, we.eBH, wi.eBH, 
+           diff.btw, diff.win) %>%
+    head(15)
+  
+  print(top_results)
+}
+```
+
+# Visualizations
+
+## MA Plot
+
+The MA plot shows the relationship between abundance (x-axis) and differential abundance (y-axis).
+
+```{r ma-plot}
+if (exists("aldex_results")) {
+  # Determine significance
+  aldex_results$Significant <- ifelse(
+    aldex_results$we.eBH < p_value_threshold & 
+    abs(aldex_results$effect) > effect_size_threshold,
+    "Significant", "Not Significant"
+  )
+  
+  p_ma <- ggplot(aldex_results, aes(x = rab.all, y = diff.btw, color = Significant)) +
+    geom_point(alpha = 0.6, size = 2) +
+    scale_color_manual(values = c("Not Significant" = "grey60", 
+                                  "Significant" = "red3")) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "blue") +
+    theme_bw() +
+    labs(title = "ALDEx2 MA Plot",
+         subtitle = paste("Red: Welch p <", p_value_threshold, "and |effect| >", 
+                         effect_size_threshold),
+         x = "Mean CLR Abundance (all samples)",
+         y = "Difference Between Conditions (CLR)",
+         color = "Status") +
+    theme(legend.position = "bottom")
+  
+  print(p_ma)
+  
+  ggsave(file.path(fig_path, "aldex2_ma_plot.png"), p_ma, 
+         width = 10, height = 8, dpi = 300)
+}
+```
+
+## Effect Size Plot
+
+The effect size plot shows the standardized effect size vs. the between-group difference.
+
+```{r effect-plot}
+if (exists("aldex_results")) {
+  p_effect <- ggplot(aldex_results, aes(x = diff.btw, y = effect, color = Significant)) +
+    geom_point(alpha = 0.6, size = 2) +
+    scale_color_manual(values = c("Not Significant" = "grey60", 
+                                  "Significant" = "red3")) +
+    geom_hline(yintercept = c(-effect_size_threshold, effect_size_threshold), 
+               linetype = "dashed", color = "blue") +
+    geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+    theme_bw() +
+    labs(title = "ALDEx2 Effect Size Plot",
+         subtitle = paste("Dashed lines: effect size threshold =", effect_size_threshold),
+         x = "Difference Between Conditions (CLR)",
+         y = "Effect Size",
+         color = "Status") +
+    theme(legend.position = "bottom")
+  
+  print(p_effect)
+  
+  ggsave(file.path(fig_path, "aldex2_effect_plot.png"), p_effect, 
+         width = 10, height = 8, dpi = 300)
+}
+```
+
+## Volcano Plot
+
+```{r volcano-plot}
+if (exists("aldex_results")) {
+  p_volcano <- ggplot(aldex_results, aes(x = effect, y = -log10(we.eBH), 
+                                          color = Significant)) +
+    geom_point(alpha = 0.6, size = 2) +
+    scale_color_manual(values = c("Not Significant" = "grey60", 
+                                  "Significant" = "red3")) +
+    geom_vline(xintercept = c(-effect_size_threshold, effect_size_threshold), 
+               linetype = "dashed", color = "blue") +
+    geom_hline(yintercept = -log10(p_value_threshold), 
+               linetype = "dashed", color = "blue") +
+    theme_bw() +
+    labs(title = "ALDEx2 Volcano Plot",
+         subtitle = paste("Thresholds: |effect| >", effect_size_threshold, 
+                         ", p <", p_value_threshold),
+         x = "Effect Size",
+         y = "-log10(BH-adjusted p-value)",
+         color = "Status") +
+    theme(legend.position = "bottom")
+  
+  print(p_volcano)
+  
+  ggsave(file.path(fig_path, "aldex2_volcano_plot.png"), p_volcano, 
+         width = 10, height = 8, dpi = 300)
+}
+```
+
+## Bland-Altman (MW) Plot
+
+This plot shows the difference vs. the within-condition difference, helping identify taxa with consistent effects.
+
+```{r mw-plot}
+if (exists("aldex_results")) {
+  p_mw <- ggplot(aldex_results, aes(x = diff.win, y = diff.btw, color = Significant)) +
+    geom_point(alpha = 0.6, size = 2) +
+    scale_color_manual(values = c("Not Significant" = "grey60", 
+                                  "Significant" = "red3")) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey40") +
+    geom_abline(slope = -1, intercept = 0, linetype = "dashed", color = "grey40") +
+    theme_bw() +
+    labs(title = "ALDEx2 MW Plot (Bland-Altman style)",
+         subtitle = "Comparing within vs. between condition differences",
+         x = "Dispersion (Difference Within Conditions)",
+         y = "Difference Between Conditions",
+         color = "Status") +
+    theme(legend.position = "bottom")
+  
+  print(p_mw)
+  
+  ggsave(file.path(fig_path, "aldex2_mw_plot.png"), p_mw, 
+         width = 10, height = 8, dpi = 300)
+}
+```
+
+## Top Differentially Abundant Taxa
+
+```{r top-taxa-barplot}
+if (exists("aldex_results")) {
+  # Get significant taxa
+  sig_taxa <- aldex_results %>%
+    filter(we.eBH < p_value_threshold) %>%
+    arrange(desc(abs(effect))) %>%
+    head(20)
+  
+  if (nrow(sig_taxa) > 0) {
+    # Create factor for ordering
+    sig_taxa$TaxLabel <- factor(sig_taxa$TaxLabel, 
+                                levels = sig_taxa$TaxLabel[order(sig_taxa$effect)])
+    
+    # Direction of change
+    sig_taxa$Direction <- ifelse(sig_taxa$effect > 0, "Enriched", "Depleted")
+    
+    p_bar <- ggplot(sig_taxa, aes(x = TaxLabel, y = effect, fill = Direction)) +
+      geom_bar(stat = "identity") +
+      coord_flip() +
+      scale_fill_manual(values = c("Enriched" = "steelblue", "Depleted" = "coral")) +
+      theme_bw() +
+      labs(title = "Top Differentially Abundant Taxa",
+           subtitle = paste("Significant taxa (p <", p_value_threshold, ")"),
+           x = "Taxon",
+           y = "Effect Size",
+           fill = "Direction") +
+      theme(axis.text.y = element_text(size = 8))
+    
+    print(p_bar)
+    
+    ggsave(file.path(fig_path, "aldex2_top_taxa.png"), p_bar, 
+           width = 12, height = 10, dpi = 300)
+  } else {
+    cat("No significant taxa found with current thresholds\n")
+  }
+}
+```
+
+## Effect Size with Confidence Intervals
+
+```{r effect-ci-plot}
+if (exists("aldex_results")) {
+  # Get top taxa by absolute effect
+  top_effect <- aldex_results %>%
+    arrange(desc(abs(effect))) %>%
+    head(20)
+  
+  top_effect$TaxLabel <- factor(top_effect$TaxLabel, 
+                                levels = top_effect$TaxLabel[order(top_effect$effect)])
+  
+  p_ci <- ggplot(top_effect, aes(x = TaxLabel, y = effect)) +
+    geom_point(aes(color = Significant), size = 3) +
+    geom_errorbar(aes(ymin = effect.low, ymax = effect.high, color = Significant), 
+                  width = 0.2) +
+    coord_flip() +
+    scale_color_manual(values = c("Not Significant" = "grey40", 
+                                  "Significant" = "red3")) +
+    geom_hline(yintercept = 0, linetype = "dashed") +
+    geom_hline(yintercept = c(-effect_size_threshold, effect_size_threshold), 
+               linetype = "dotted", color = "blue") +
+    theme_bw() +
+    labs(title = "Effect Size with 95% Confidence Intervals",
+         subtitle = "Top 20 taxa by absolute effect size",
+         x = "Taxon",
+         y = "Effect Size (with 95% CI)",
+         color = "Status") +
+    theme(axis.text.y = element_text(size = 8))
+  
+  print(p_ci)
+  
+  ggsave(file.path(fig_path, "aldex2_effect_ci.png"), p_ci, 
+         width = 12, height = 10, dpi = 300)
+}
+```
+
+# Export Results
+
+```{r export-results}
+if (exists("aldex_results")) {
+  # Export full results
+  write.csv(aldex_results, 
+            file.path(table_path, "aldex2_full_results.csv"), 
+            row.names = FALSE)
+  cat("Full results saved to:", file.path(table_path, "aldex2_full_results.csv"), "\n")
+  
+  # Export significant results only
+  sig_results <- aldex_results %>%
+    filter(we.eBH < p_value_threshold | wi.eBH < p_value_threshold) %>%
+    arrange(we.eBH)
+  
+  if (nrow(sig_results) > 0) {
+    write.csv(sig_results, 
+              file.path(table_path, "aldex2_significant_results.csv"), 
+              row.names = FALSE)
+    cat("Significant results saved to:", 
+        file.path(table_path, "aldex2_significant_results.csv"), "\n")
+    cat("Number of significant taxa:", nrow(sig_results), "\n")
+  }
+  
+  # Export summary statistics
+  summary_stats <- data.frame(
+    Metric = c("Total taxa analyzed",
+               "Significant (Welch BH < 0.05)",
+               "Significant (Wilcoxon BH < 0.05)",
+               "Large effect (|effect| > 1)",
+               "Significant AND large effect",
+               "Reference method",
+               "Monte Carlo samples"),
+    Value = c(nrow(aldex_results),
+              sum(aldex_results$we.eBH < 0.05, na.rm = TRUE),
+              sum(aldex_results$wi.eBH < 0.05, na.rm = TRUE),
+              sum(abs(aldex_results$effect) > 1, na.rm = TRUE),
+              sum(aldex_results$we.eBH < 0.05 & abs(aldex_results$effect) > 1, 
+                  na.rm = TRUE),
+              ifelse(is.null(reference_taxa), "Standard CLR (all)", "Custom reference"),
+              mc_samples)
+  )
+  
+  write.csv(summary_stats, 
+            file.path(table_path, "aldex2_summary_stats.csv"), 
+            row.names = FALSE)
+  cat("Summary statistics saved to:", 
+      file.path(table_path, "aldex2_summary_stats.csv"), "\n")
+}
+```
+
+# Understanding ALDEx2 Output
+
+## Key Columns in Results
+
+- **rab.all**: Mean relative abundance across all samples (CLR-transformed)
+- **rab.win.{group}**: Mean relative abundance within each group
+- **diff.btw**: Difference between groups (median of Monte Carlo instances)
+- **diff.win**: Maximum difference within groups (dispersion)
+- **effect**: Standardized effect size (diff.btw / diff.win)
+- **effect.low/effect.high**: 95% confidence interval for effect size
+- **overlap**: Proportion of distribution overlap between groups (lower = more different)
+- **we.ep**: Welch's t-test p-value (expected value from Monte Carlo)
+- **we.eBH**: Welch's t-test BH-corrected p-value
+- **wi.ep**: Wilcoxon rank-sum test p-value
+- **wi.eBH**: Wilcoxon rank-sum test BH-corrected p-value
+
+## Interpretation Guidelines
+
+1. **Effect Size > 1**: Generally considered biologically meaningful
+2. **Overlap < 0.05**: Very distinct between groups
+3. **Use BH-corrected p-values**: Always use we.eBH or wi.eBH for significance
+4. **Consider both statistics**: Welch is more powerful, Wilcoxon is more robust
+
+# Session Information
+
+```{r session-info}
+sessionInfo()
+```
+
+# Summary
+
+This workflow provided:
+
+1. ✓ **Data Loading**: Loaded phyloseq object or created data manually
+2. ✓ **Reference Taxa Selection**: Multiple methods for selecting custom reference taxa
+   - By taxonomy
+   - By abundance stability (coefficient of variation)
+   - By pre-screening for non-differential taxa
+3. ✓ **ALDEx2 Analysis**: 
+   - CLR transformation with custom or standard reference
+   - Statistical testing (Welch's t-test and Wilcoxon)
+   - Effect size calculation with confidence intervals
+4. ✓ **Visualizations**:
+   - MA plot
+   - Effect size plot
+   - Volcano plot
+   - MW (Bland-Altman) plot
+   - Top taxa bar plot
+   - Effect size with confidence intervals
+5. ✓ **Results Export**: Full and significant results saved to CSV
+
+## Notes on Custom Reference Taxa
+
+Using custom reference taxa can be powerful but requires careful consideration:
+
+- **Pros**: Can improve detection of differential taxa when you have reliable reference organisms
+- **Cons**: Results depend heavily on reference choice; biased references lead to biased results
+- **Best practice**: Validate reference taxa selection using multiple criteria and compare results with standard CLR
+
+## References
+
+1. Fernandes AD, et al. (2014) Unifying the analysis of high-throughput sequencing datasets: characterizing RNA-seq, 16S rRNA gene sequencing and selective growth experiments by compositional data analysis. *Microbiome* 2:15
+2. Fernandes AD, et al. (2013) ANOVA-like differential expression (ALDEx) analysis for mixed population RNA-Seq. *PLoS ONE* 8:e67019
+3. Gloor GB, et al. (2017) Microbiome datasets are compositional: and this is not optional. *Front Microbiol* 8:2224
