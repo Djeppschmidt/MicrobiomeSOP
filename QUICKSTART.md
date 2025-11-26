@@ -56,6 +56,8 @@ data/raw/
 ├── Sample2_R2_001.fastq.gz
 ...
 ```
+There is a test data set in Data/test that you can use. The YAML is already configured for this data.
+
 
 **File naming requirements**:
 - Forward reads must contain `_R1_001.fastq` (or `.fastq.gz`)
